@@ -57,8 +57,3 @@ airflow-webserver.pid
 .env.local
 .env.production
 
-# Sauvegardes
-backups/
-*.sql
-*.sql.gz
-
