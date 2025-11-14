@@ -1,0 +1,49 @@
+services:
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: Traffic_Tracking
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    ports:
+      - "5432:5432"
+
+  airflow:
+    image: apache/airflow:2.7.1
+    environment:
+      &airflow-common-env
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://postgres:postgres@postgres/Traffic_Tracking
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+      AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.basic_auth'
+      AIRFLOW__SCHEDULER__MIN_FILE_PROCESS_INTERVAL: 30
+      AIRFLOW__CORE__DAGBAG_IMPORT_TIMEOUT: 120
+      AIRFLOW__WEBSERVER__WEB_SERVER_WORKER_TIMEOUT: 120
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./plugins:/opt/airflow/plugins
+      - ./src:/opt/airflow/src
+      - ./models:/opt/airflow/models
+      - ./cache:/opt/airflow/cache
+      - ./requirements-airflow.txt:/requirements-airflow.txt
+    ports:
+      - "8081:8080"
+    command: >
+      bash -c "
+        pip install --no-cache-dir -r /requirements-airflow.txt &&
+        airflow db init &&
+        airflow users create --username Alidorsabue --password Virgi@1996 --firstname Alidor --lastname SABUE --role Admin --email sabuetshibangualidor@gmail.com || true &&
+        rm -f /tmp/airflow-webserver.pid &&
+        airflow webserver & 
+        airflow scheduler
+      "
+    depends_on:
+      - postgres
+    restart: always
+
+volumes:
+  postgres_data:

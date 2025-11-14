@@ -1,0 +1,15 @@
+pandas
+streamlit
+schedule
+psycopg2-binary
+folium
+streamlit-folium
+osmnx
+geopandas
+shapely
+numpy
+sqlalchemy
+scikit-learn
+joblib
+flask
+twilio

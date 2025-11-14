@@ -1,0 +1,5 @@
+# Ce dossier est utilisé par OSMnx pour mettre en cache le réseau routier téléchargé
+# Le cache évite de re-télécharger les données à chaque exécution, ce qui accélère le processus
+# Les fichiers de cache sont automatiquement générés lors de la première utilisation
+# Ne pas commiter les fichiers de cache (ils sont dans .gitignore)
+

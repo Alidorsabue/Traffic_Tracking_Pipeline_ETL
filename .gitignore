@@ -1,0 +1,64 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Environnements virtuels
+venv/
+env/
+ENV/
+.venv
+
+# Cache OSMnx (le dossier existe mais le contenu est ignoré)
+cache/*
+!cache/.gitkeep
+*.json
+
+# Logs Airflow
+logs/
+*.log
+
+# Fichiers de test temporaires
+test_*.py
+*_test.py
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Airflow
+airflow.db
+airflow.cfg
+airflow-webserver.pid
+
+# Modèles ML (optionnel - commenter si vous voulez les versionner)
+# models/*.pkl
+
+# Base de données locale
+*.db
+*.sqlite
+
+# Fichiers temporaires
+*.tmp
+*.bak
+*.backup
+
+# Variables d'environnement (production)
+.env
+.env.local
+.env.production
+
+# Sauvegardes
+backups/
+*.sql
+*.sql.gz
+

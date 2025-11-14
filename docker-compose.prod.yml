@@ -1,0 +1,81 @@
+services:
+  # Note: PostgreSQL tourne sur l'hôte (port 5433), pas dans Docker
+  # Le service postgres ci-dessous est commenté car PostgreSQL est externe
+  # postgres:
+  #   image: postgres:18
+  #   environment:
+  #     POSTGRES_USER: ${POSTGRES_USER:-postgres}
+  #     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+  #     POSTGRES_DB: ${POSTGRES_DB:-Traffic_Tracking}
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql
+  #   ports:
+  #     - "${POSTGRES_PORT:-5433}:5432"
+  #   restart: always
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+  #   networks:
+  #     - traffic_network
+
+  airflow:
+    image: apache/airflow:2.7.1
+    environment:
+      &airflow-common-env
+      AIRFLOW__CORE__EXECUTOR: ${AIRFLOW_EXECUTOR:-LocalExecutor}
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER:-Alidorsabue}:${POSTGRES_PASSWORD:-Virgi@1996}@${POSTGRES_HOST:-africaits.com}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-Traffic_Tracking}
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'false'
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+      AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.basic_auth'
+      AIRFLOW__SCHEDULER__MIN_FILE_PROCESS_INTERVAL: 30
+      AIRFLOW__CORE__DAGBAG_IMPORT_TIMEOUT: 120
+      AIRFLOW__WEBSERVER__WEB_SERVER_WORKER_TIMEOUT: 120
+      AIRFLOW__WEBSERVER__EXPOSE_CONFIG: 'false'
+      # Variables d'environnement pour le code
+      # PostgreSQL est sur le serveur de production (africaits.com)
+      POSTGRES_HOST: ${POSTGRES_HOST:-africaits.com}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_DB: ${POSTGRES_DB:-Traffic_Tracking}
+      POSTGRES_USER: ${POSTGRES_USER:-Alidorsabue}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-Virgi@1996}
+      TWILIO_SID: ${TWILIO_SID:-}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
+      TWILIO_WHATSAPP_NUMBER: ${TWILIO_WHATSAPP_NUMBER:-whatsapp:+14155238886}
+      ALERT_THRESHOLD: ${ALERT_THRESHOLD:-0.6}
+      DEBOUNCE_MIN: ${DEBOUNCE_MIN:-900}
+      ENVIRONMENT: production
+      DEBUG: ${DEBUG:-false}
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./plugins:/opt/airflow/plugins
+      - ./src:/opt/airflow/src
+      - ./models:/opt/airflow/models
+      - ./cache:/opt/airflow/cache
+      - ./requirements-airflow.txt:/requirements-airflow.txt
+    ports:
+      - "${AIRFLOW_PORT:-8081}:8080"
+    command: >
+      bash -c "
+        pip install --no-cache-dir -r /requirements-airflow.txt &&
+        airflow db init &&
+        airflow users create --username ${AIRFLOW_USERNAME:-Alidorsabue} --password ${AIRFLOW_PASSWORD:-Virgi@1996} --firstname ${AIRFLOW_FIRSTNAME:-Alidor} --lastname ${AIRFLOW_LASTNAME:-SABUE} --role Admin --email ${AIRFLOW_EMAIL:-sabuetshibangualidor@gmail.com} || true &&
+        rm -f /tmp/airflow-webserver.pid &&
+        airflow webserver & 
+        airflow scheduler
+      "
+    # depends_on supprimé car PostgreSQL est sur l'hôte, pas dans Docker
+    restart: always
+    networks:
+      - traffic_network
+
+# volumes:
+#   postgres_data:
+#     driver: local
+
+networks:
+  traffic_network:
+    driver: bridge
+
