@@ -45,6 +45,10 @@ docker-compose --version
 psql --version
 
 # Vérifier la connexion à PostgreSQL
+# Option 1 : Si PostgreSQL tourne dans Docker (dans /opt/Traffic_tracking_app/backend/)
+cd /opt/Traffic_tracking_app/backend/ && docker-compose exec postgres psql -U Alidorsabue -d Traffic_Tracking -c "SELECT version();"
+
+# Option 2 : Connexion directe
 psql -h africaits.com -p 5432 -U Alidorsabue -d Traffic_Tracking -c "SELECT version();"
 ```
 
@@ -85,7 +89,7 @@ cd /opt/traffic-tracking
 
 ```bash
 # Cloner le repository
-git clone https://github.com/votre-username/Traffic_tracking_Pipiline_ETL.git .
+git clone git clone https://github.com/Alidorsabue/Traffic_Tracking_Pipeline_ETL.git .
 
 # Ou avec SSH (si configuré)
 # git clone git@github.com:votre-username/Traffic_tracking_Pipiline_ETL.git .
@@ -104,20 +108,67 @@ scp -r /chemin/vers/Traffic_tracking_Pipiline_ETL user@africaits.com:/opt/traffi
 
 ## 🗄️ Configuration de la base de données
 
+> **Important** : La base de données PostgreSQL tourne dans le répertoire de l'application mobile backend : `/opt/Traffic_tracking_app/backend/`
+
 ### 1. Vérifier que PostgreSQL est accessible
 
+**Option A : Si PostgreSQL tourne dans Docker (dans `/opt/Traffic_tracking_app/backend/`)**
+
 ```bash
-# Tester la connexion
+# Aller dans le répertoire de l'application mobile backend
+cd /opt/Traffic_tracking_app/backend/
+
+# Vérifier que les conteneurs Docker sont en cours d'exécution
+docker-compose ps
+# ou
+docker ps | grep postgres
+
+# Se connecter à PostgreSQL via le conteneur Docker
+docker-compose exec postgres psql -U Alidorsabue -d Traffic_Tracking
+# ou si le service s'appelle différemment
+docker-compose exec db psql -U Alidorsabue -d Traffic_Tracking
+```
+
+**Option B : Connexion directe depuis l'extérieur**
+
+```bash
+# Tester la connexion depuis n'importe où
 psql -h africaits.com -p 5432 -U Alidorsabue -d Traffic_Tracking
 ```
 
+**Option C : Connexion locale sur le serveur**
+
+
+```bash
+# Si PostgreSQL est accessible localement
+psql -h localhost -p 5432 -U Alidorsabue -d Traffic_Tracking
+```
+
 Si la connexion échoue, vérifiez :
-- Que PostgreSQL est démarré
+- Que PostgreSQL est démarré (dans Docker ou comme service système)
 - Que l'utilisateur `Alidorsabue` existe
 - Que le mot de passe est correct
 - Que le firewall autorise les connexions
+- Que le port 5432 est bien exposé dans le docker-compose
 
 ### 2. Initialiser les tables
+
+**Si PostgreSQL tourne dans Docker (dans `/opt/Traffic_tracking_app/backend/`)** :
+
+```bash
+# Aller dans le répertoire de l'application mobile backend
+cd /opt/Traffic_tracking_app/backend/
+
+# Copier le fichier init_database.sql dans le conteneur ou l'exécuter depuis l'extérieur
+# Option 1 : Depuis l'extérieur (si le port est exposé)
+psql -h africaits.com -p 5432 -U Alidorsabue -d Traffic_Tracking -f /opt/traffic-tracking/init_database.sql
+
+# Option 2 : Via Docker (copier le fichier dans le conteneur)
+docker cp /opt/traffic-tracking/init_database.sql $(docker-compose ps -q postgres):/tmp/init_database.sql
+docker-compose exec postgres psql -U Alidorsabue -d Traffic_Tracking -f /tmp/init_database.sql
+```
+
+**Si PostgreSQL est accessible directement** :
 
 ```bash
 # Depuis le répertoire du projet
@@ -127,6 +178,11 @@ psql -h africaits.com -p 5432 -U Alidorsabue -d Traffic_Tracking -f init_databas
 **Vérification** :
 
 ```bash
+# Option 1 : Via Docker (si PostgreSQL tourne dans Docker)
+cd /opt/Traffic_tracking_app/backend/
+docker-compose exec postgres psql -U Alidorsabue -d Traffic_Tracking -c "\dt"
+
+# Option 2 : Connexion directe
 psql -h africaits.com -p 5432 -U Alidorsabue -d Traffic_Tracking -c "\dt"
 ```
 
@@ -198,6 +254,9 @@ POSTGRES_PORT=5432
 POSTGRES_DB=Traffic_Tracking
 POSTGRES_USER=Alidorsabue
 POSTGRES_PASSWORD=Virgi@1996
+# IMPORTANT: Mot de passe encodé pour URL (nécessaire si le mot de passe contient des caractères spéciaux comme @)
+# Le @ doit être encodé en %40 dans les URLs de connexion
+POSTGRES_PASSWORD_ENCODED=Virgi%401996
 
 # Configuration Airflow
 AIRFLOW_USERNAME=Alidorsabue
@@ -348,6 +407,29 @@ print(f'Résultat: {result}')
 
 ### 3. Vérifier que les données sont collectées
 
+**Option A : Via Docker (si PostgreSQL tourne dans `/opt/Traffic_tracking_app/backend/`)** :
+
+```bash
+# Aller dans le répertoire de l'application mobile backend
+cd /opt/Traffic_tracking_app/backend/
+
+# Vérifier les données GPS
+docker-compose exec postgres psql -U Alidorsabue -d Traffic_Tracking -c "
+SELECT COUNT(*) as total_points, 
+       MAX(timestamp) as dernier_point 
+FROM gps_points;
+"
+
+# Vérifier les agrégations
+docker-compose exec postgres psql -U Alidorsabue -d Traffic_Tracking -c "
+SELECT COUNT(*) as total_edges, 
+       MAX(ts) as dernier_aggregation 
+FROM edge_agg;
+"
+```
+
+**Option B : Connexion directe** :
+
 ```bash
 # Vérifier les données GPS
 psql -h africaits.com -p 5432 -U Alidorsabue -d Traffic_Tracking -c "
@@ -430,6 +512,31 @@ nano /opt/traffic-tracking/backup.sh
 
 Contenu du script :
 
+**Option A : Si PostgreSQL tourne dans Docker (dans `/opt/Traffic_tracking_app/backend/`)** :
+
+```bash
+#!/bin/bash
+BACKUP_DIR="/opt/traffic-tracking/backups"
+DATE=$(date +%Y%m%d_%H%M%S)
+mkdir -p $BACKUP_DIR
+
+# Aller dans le répertoire de l'application mobile backend
+cd /opt/Traffic_tracking_app/backend/
+
+# Sauvegarder la base de données via Docker
+docker-compose exec -T postgres pg_dump -U Alidorsabue Traffic_Tracking > $BACKUP_DIR/backup_$DATE.sql
+
+# Compresser la sauvegarde
+gzip $BACKUP_DIR/backup_$DATE.sql
+
+# Garder seulement les 7 derniers backups
+find $BACKUP_DIR -name "backup_*.sql.gz" -mtime +7 -delete
+
+echo "Sauvegarde terminée: backup_$DATE.sql.gz"
+```
+
+**Option B : Si PostgreSQL est accessible directement** :
+
 ```bash
 #!/bin/bash
 BACKUP_DIR="/opt/traffic-tracking/backups"
@@ -479,26 +586,200 @@ sudo ufw enable
 
 ### 2. HTTPS (recommandé)
 
-Pour exposer Airflow et Streamlit via HTTPS, utilisez un reverse proxy comme Nginx :
+Airflow utilise HTTP par défaut, ce qui n'est **pas sécurisé** pour la production. Pour exposer Airflow via HTTPS, utilisez un reverse proxy Nginx avec un certificat SSL.
+
+**Pourquoi HTTP par défaut ?**
+- Airflow est conçu pour être utilisé en interne ou derrière un reverse proxy
+- La configuration HTTPS native d'Airflow est complexe
+- La solution standard est d'utiliser Nginx comme reverse proxy avec SSL/TLS
+
+#### Méthode 1 : HTTPS avec Let's Encrypt (gratuit et recommandé)
+
+**Étape 1 : Installer Nginx et Certbot**
+
+```bash
+# Installer Nginx
+sudo apt update
+sudo apt install nginx certbot python3-certbot-nginx -y
+
+# Vérifier que Nginx fonctionne
+sudo systemctl status nginx
+```
+
+**Étape 2 : Configuration Nginx pour Airflow (HTTP temporaire)**
+
+```bash
+# Créer la configuration Nginx
+sudo nano /etc/nginx/sites-available/airflow
+```
+
+Contenu du fichier :
 
 ```nginx
-# Configuration Nginx (exemple)
 server {
     listen 80;
     server_name africaits.com;
 
-    location /airflow {
+    # Configuration pour Airflow
+    location / {
         proxy_pass http://localhost:8081;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # WebSocket support (nécessaire pour Airflow)
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 86400;
     }
 
-    location /dashboard {
-        proxy_pass http://localhost:8501;
+    # Empêcher l'accès direct au port 8081 (sécurité)
+    # Laisser le port 8081 fermé au firewall si possible
+}
+```
+
+**Étape 3 : Activer la configuration**
+
+```bash
+# Créer un lien symbolique
+sudo ln -s /etc/nginx/sites-available/airflow /etc/nginx/sites-enabled/
+
+# Vérifier la configuration
+sudo nginx -t
+
+# Redémarrer Nginx
+sudo systemctl restart nginx
+```
+
+**Étape 4 : Obtenir un certificat SSL avec Let's Encrypt**
+
+```bash
+# Obtenir et installer le certificat SSL
+sudo certbot --nginx -d africaits.com
+
+# Suivre les instructions interactives :
+# - Entrer votre email
+# - Accepter les termes
+# - Choisir de rediriger HTTP vers HTTPS (recommandé)
+```
+
+Certbot modifiera automatiquement votre configuration Nginx pour utiliser HTTPS.
+
+**Étape 5 : Configuration Nginx finale (après Certbot)**
+
+Vérifiez que votre fichier `/etc/nginx/sites-available/airflow` contient maintenant quelque chose comme :
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name africaits.com;
+
+    ssl_certificate /etc/letsencrypt/live/africaits.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/africaits.com/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    location / {
+        proxy_pass http://localhost:8081;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # WebSocket support
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 86400;
     }
 }
+
+server {
+    listen 80;
+    server_name africaits.com;
+    return 301 https://$server_name$request_uri;
+}
+```
+
+**Étape 6 : Mettre à jour le firewall**
+
+```bash
+# Autoriser HTTPS (port 443)
+sudo ufw allow 443/tcp
+
+# Optionnel : Bloquer l'accès direct au port 8081 depuis l'extérieur
+# (Airflow ne sera accessible que via Nginx sur HTTPS)
+# sudo ufw delete allow 8081/tcp
+```
+
+**Étape 7 : Renouvellement automatique du certificat**
+
+Les certificats Let's Encrypt expirent après 90 jours. Le renouvellement est automatique avec certbot :
+
+```bash
+# Tester le renouvellement
+sudo certbot renew --dry-run
+
+# Le renouvellement automatique est configuré dans /etc/cron.d/certbot
+```
+
+**Étape 8 : Mettre à jour la configuration Airflow**
+
+Dans le fichier `.env`, vous pouvez ajouter :
+
+```bash
+# Configuration pour HTTPS via reverse proxy
+AIRFLOW__WEBSERVER__BASE_URL=https://africaits.com
+AIRFLOW__WEBSERVER__ENABLE_PROXY_FIX=true
+```
+
+Puis redémarrer Airflow :
+
+```bash
+docker-compose -f docker-compose.prod.yml restart airflow
+```
+
+**Accès** : Airflow sera maintenant accessible via `https://africaits.com` (au lieu de `http://africaits.com:8081`)
+
+#### Méthode 2 : Configuration manuelle avec certificat SSL existant
+
+Si vous avez déjà un certificat SSL :
+
+```bash
+# Créer le répertoire pour les certificats
+sudo mkdir -p /etc/nginx/ssl
+
+# Copier vos certificats (remplacer par vos chemins)
+# sudo cp votre-certificat.crt /etc/nginx/ssl/africaits.com.crt
+# sudo cp votre-cle.privee.key /etc/nginx/ssl/africaits.com.key
+
+# Modifier la configuration Nginx avec les chemins de vos certificats
+```
+
+#### Sécurité supplémentaire
+
+**Bloquer l'accès direct au port 8081 :**
+
+```bash
+# Dans le firewall, retirer l'autorisation du port 8081
+sudo ufw delete allow 8081/tcp
+
+# Airflow ne sera accessible QUE via Nginx sur HTTPS
+# Depuis localhost, vous pouvez toujours accéder à http://localhost:8081 si nécessaire
+```
+
+**Ajouter une authentification HTTP basique supplémentaire (optionnel) :**
+
+```bash
+# Créer un fichier de mots de passe
+sudo apt install apache2-utils
+sudo htpasswd -c /etc/nginx/.htpasswd Alidorsabue
+
+# Ajouter dans la configuration Nginx (section location /) :
+# auth_basic "Restricted Access";
+# auth_basic_user_file /etc/nginx/.htpasswd;
 ```
 
 ### 3. Mots de passe forts
@@ -531,13 +812,504 @@ sudo apt-get install docker-ce docker-ce-cli containerd.io
 3. Vérifier la mémoire : `free -h`
 4. Vérifier que les ports ne sont pas déjà utilisés : `netstat -tulpn | grep 8081`
 
-### Problème : Erreur de connexion à PostgreSQL
+### Problème : Erreur de connexion à PostgreSQL - "Connection refused"
 
-**Solutions** :
-1. Vérifier que PostgreSQL est accessible : `psql -h africaits.com -p 5432 -U Alidorsabue -d Traffic_Tracking`
-2. Vérifier les credentials dans `.env`
-3. Vérifier la connectivité réseau : `ping africaits.com`
-4. Vérifier les logs PostgreSQL sur le serveur
+Si vous obtenez l'erreur :
+```
+psql: error: connection to server at "africaits.com" (134.209.180.30), port 5432 failed: Connection refused
+```
+
+> **Important** : La base de données PostgreSQL tourne dans `/opt/Traffic_tracking_app/backend/` (application mobile backend)
+
+**Diagnostic étape par étape** :
+
+#### 1. Vérifier que PostgreSQL est démarré dans Docker
+
+Si PostgreSQL tourne dans Docker (dans `/opt/Traffic_tracking_app/backend/`) :
+
+```bash
+# Aller dans le répertoire de l'application mobile backend
+cd /opt/Traffic_tracking_app/backend/
+
+# Vérifier que les conteneurs sont en cours d'exécution
+docker-compose ps
+# ou
+docker ps | grep postgres
+
+# Si PostgreSQL n'est pas démarré, le démarrer
+docker-compose up -d postgres
+# ou
+docker-compose up -d db
+```
+
+**Si PostgreSQL tourne comme service système** :
+
+```bash
+# Sur le serveur (africaits.com), vérifier le statut de PostgreSQL
+sudo systemctl status postgresql
+# ou
+sudo service postgresql status
+
+# Si PostgreSQL n'est pas démarré, le démarrer
+sudo systemctl start postgresql
+# ou
+sudo service postgresql start
+
+# Activer PostgreSQL au démarrage
+sudo systemctl enable postgresql
+```
+
+#### 2. Tester la connexion locale d'abord
+
+**Si PostgreSQL tourne dans Docker** :
+
+```bash
+# Aller dans le répertoire de l'application mobile backend
+cd /opt/Traffic_tracking_app/backend/
+
+# Se connecter via Docker
+docker-compose exec postgres psql -U Alidorsabue -d Traffic_Tracking
+# ou
+docker-compose exec db psql -U Alidorsabue -d Traffic_Tracking
+
+# Vérifier les variables d'environnement du conteneur
+docker-compose exec postgres env | grep POSTGRES
+```
+
+**Si PostgreSQL tourne comme service système** :
+
+```bash
+# Se connecter en local sur le serveur
+sudo -u postgres psql
+
+# Ou avec l'utilisateur Alidorsabue (si configuré localement)
+psql -U Alidorsabue -d Traffic_Tracking
+```
+
+#### 3. Vérifier que PostgreSQL écoute sur toutes les interfaces
+
+**Si PostgreSQL tourne dans Docker** :
+
+Vérifier que le port 5432 est bien exposé dans le `docker-compose.yml` :
+
+```bash
+# Aller dans le répertoire de l'application mobile backend
+cd /opt/Traffic_tracking_app/backend/
+
+# Vérifier la configuration docker-compose
+cat docker-compose.yml | grep -A 5 postgres
+# ou
+cat docker-compose.yml | grep -A 5 db
+
+# Vérifier que le port est exposé (devrait contenir "5432:5432" ou similaire)
+```
+
+Si le port n'est pas exposé, modifier le `docker-compose.yml` :
+
+```yaml
+services:
+  postgres:  # ou db
+    # ... autres configurations ...
+    ports:
+      - "5432:5432"  # S'assurer que cette ligne existe
+```
+
+Puis redémarrer le conteneur :
+
+```bash
+docker-compose down
+docker-compose up -d postgres
+```
+
+**Si PostgreSQL tourne comme service système** :
+
+PostgreSQL doit être configuré pour accepter les connexions TCP/IP depuis l'extérieur.
+
+**Diagnostic** : Vérifier sur quelle interface PostgreSQL écoute :
+
+```bash
+# Vérifier sur quelle interface PostgreSQL écoute
+sudo ss -tulpn | grep 5432
+# ou
+sudo netstat -tulpn | grep 5432
+```
+
+**Si vous voyez `127.0.0.1:5432`** : PostgreSQL écoute seulement sur localhost. Il faut le configurer pour écouter sur toutes les interfaces (`0.0.0.0:5432`).
+
+**Trouver et modifier le fichier de configuration** :
+
+```bash
+# Trouver le fichier de configuration postgresql.conf (méthode recommandée)
+sudo -u postgres psql -c "SHOW config_file;"
+
+# Ou chercher manuellement
+sudo find /etc -name postgresql.conf 2>/dev/null
+# Ou généralement dans :
+# /etc/postgresql/14/main/postgresql.conf (pour PostgreSQL 14)
+# /etc/postgresql/18/main/postgresql.conf (pour PostgreSQL 18)
+# /etc/postgresql/*/main/postgresql.conf (pour toutes les versions)
+# /var/lib/pgsql/data/postgresql.conf (selon la distribution)
+
+# Trouver aussi le répertoire de données
+sudo -u postgres psql -c "SHOW data_directory;"
+```
+
+**Éditer le fichier postgresql.conf** :
+
+```bash
+# Éditer le fichier (utiliser le chemin trouvé avec "SHOW config_file;" ci-dessus)
+# Exemples selon la version :
+sudo nano /etc/postgresql/14/main/postgresql.conf  # Pour PostgreSQL 14
+sudo nano /etc/postgresql/18/main/postgresql.conf  # Pour PostgreSQL 18
+# ou
+sudo nano /var/lib/pgsql/data/postgresql.conf  # Pour certaines distributions
+```
+
+**Modifier la ligne suivante** :
+```conf
+# Chercher cette ligne (généralement commentée ou avec 'localhost')
+#listen_addresses = 'localhost'
+# ou
+#listen_addresses = '127.0.0.1'
+
+# La modifier pour écouter sur toutes les interfaces
+listen_addresses = '*'
+```
+
+**Redémarrer PostgreSQL** :
+```bash
+# Trouver le nom exact du service PostgreSQL
+sudo systemctl list-units | grep postgresql
+
+# Redémarrer le service PostgreSQL (remplacer 14 par votre version)
+sudo systemctl restart postgresql@14-main  # Pour PostgreSQL 14
+# ou
+sudo systemctl restart postgresql@18-main  # Pour PostgreSQL 18
+# ou
+sudo systemctl restart postgresql  # Service générique (peut ne pas fonctionner)
+
+# Vérifier que PostgreSQL écoute maintenant sur toutes les interfaces
+sudo ss -tulpn | grep 5432
+# ou si ss n'est pas disponible
+sudo netstat -tulpn | grep 5432
+
+# Vous devriez maintenant voir : 0.0.0.0:5432 au lieu de 127.0.0.1:5432
+```
+
+#### 4. Configurer pg_hba.conf pour autoriser les connexions distantes
+
+**Si PostgreSQL tourne dans Docker** :
+
+Accéder au conteneur et modifier `pg_hba.conf` :
+
+```bash
+# Aller dans le répertoire de l'application mobile backend
+cd /opt/Traffic_tracking_app/backend/
+
+# Se connecter au conteneur PostgreSQL
+docker-compose exec postgres bash
+# ou
+docker-compose exec db bash
+
+# Dans le conteneur, trouver et éditer pg_hba.conf
+# Généralement dans /var/lib/postgresql/data/pg_hba.conf
+find /var/lib/postgresql -name pg_hba.conf
+nano /var/lib/postgresql/data/pg_hba.conf
+```
+
+**Ajouter ces lignes à la fin du fichier** (avant toute ligne `# TYPE`) :
+```conf
+# Autoriser les connexions depuis n'importe quelle IP (à adapter selon vos besoins de sécurité)
+host    Traffic_Tracking    Alidorsabue    0.0.0.0/0    md5
+
+# Ou pour plus de sécurité, autoriser seulement depuis des IPs spécifiques :
+# host    Traffic_Tracking    Alidorsabue    134.209.180.0/24    md5
+```
+
+**Redémarrer le conteneur PostgreSQL** :
+```bash
+# Sortir du conteneur (Ctrl+D ou exit)
+docker-compose restart postgres
+# ou
+docker-compose restart db
+```
+
+**Si PostgreSQL tourne comme service système** :
+
+```bash
+# Trouver le fichier pg_hba.conf (méthode recommandée)
+sudo -u postgres psql -c "SHOW hba_file;"
+
+# Ou chercher manuellement
+sudo find /etc -name pg_hba.conf 2>/dev/null
+# Ou généralement dans :
+# /etc/postgresql/14/main/pg_hba.conf (pour PostgreSQL 14)
+# /etc/postgresql/18/main/pg_hba.conf (pour PostgreSQL 18)
+# /etc/postgresql/*/main/pg_hba.conf (pour toutes les versions)
+# /var/lib/pgsql/data/pg_hba.conf (selon la distribution)
+
+# Éditer le fichier (utiliser le chemin trouvé avec "SHOW hba_file;" ci-dessus)
+sudo nano /etc/postgresql/14/main/pg_hba.conf  # Pour PostgreSQL 14
+# ou
+sudo nano /etc/postgresql/18/main/pg_hba.conf  # Pour PostgreSQL 18
+```
+
+**Ajouter ces lignes à la fin du fichier** (avant toute ligne `# TYPE`) :
+```conf
+# Autoriser les connexions depuis n'importe quelle IP (à adapter selon vos besoins de sécurité)
+host    Traffic_Tracking    Alidorsabue    0.0.0.0/0    md5
+
+# Ou pour plus de sécurité, autoriser seulement depuis des IPs spécifiques :
+# host    Traffic_Tracking    Alidorsabue    134.209.180.0/24    md5
+```
+
+**Important** : Si l'utilisateur `Alidorsabue` n'existe pas encore, vous devrez d'abord le créer (voir section 9 ci-dessous).
+
+**Redémarrer PostgreSQL** :
+```bash
+# Trouver le nom exact du service PostgreSQL
+sudo systemctl list-units | grep postgresql
+
+# Redémarrer le service PostgreSQL (remplacer 14 par votre version)
+sudo systemctl restart postgresql@14-main  # Pour PostgreSQL 14
+# ou
+sudo systemctl restart postgresql@18-main  # Pour PostgreSQL 18
+
+# Vérifier que la configuration est correcte
+sudo -u postgres psql -c "SHOW hba_file;"
+```
+
+#### 5. Vérifier le firewall
+
+```bash
+# Vérifier si le port 5432 est ouvert
+sudo ufw status
+# ou
+sudo iptables -L -n | grep 5432
+
+# Si UFW est actif, autoriser le port 5432
+sudo ufw allow 5432/tcp
+sudo ufw reload
+
+# Pour iptables (si utilisé directement)
+sudo iptables -A INPUT -p tcp --dport 5432 -j ACCEPT
+sudo iptables-save
+```
+
+#### 6. Vérifier que le port 5432 est bien en écoute
+
+```bash
+# Vérifier que PostgreSQL écoute sur le port 5432
+sudo netstat -tulpn | grep 5432
+# ou
+sudo ss -tulpn | grep 5432
+
+# Vous devriez voir quelque chose comme :
+# tcp  0  0  0.0.0.0:5432  0.0.0.0:*  LISTEN  <PID>/postgres
+```
+
+#### 7. Tester la connexion depuis l'extérieur
+
+```bash
+# Depuis votre machine locale ou depuis le serveur
+psql -h africaits.com -p 5432 -U Alidorsabue -d Traffic_Tracking
+
+# Si cela fonctionne, vous devriez voir le prompt psql
+```
+
+#### 8. Vérifier les logs PostgreSQL en cas d'échec
+
+```bash
+# Consulter les logs PostgreSQL
+sudo tail -f /var/log/postgresql/postgresql-18-main.log
+# ou
+sudo journalctl -u postgresql -f
+
+# Tenter une connexion et observer les erreurs dans les logs
+```
+
+#### 9. Vérifier que l'utilisateur et la base de données existent
+
+```bash
+# Se connecter en tant qu'administrateur PostgreSQL
+sudo -u postgres psql
+
+# Vérifier que l'utilisateur existe
+\du
+
+# Vérifier que la base de données existe
+\l
+
+# Si l'utilisateur n'existe pas, le créer :
+CREATE USER Alidorsabue WITH PASSWORD 'Virgi@1996';
+
+# Si la base de données n'existe pas, la créer :
+CREATE DATABASE Traffic_Tracking OWNER Alidorsabue;
+
+# Donner les permissions
+GRANT ALL PRIVILEGES ON DATABASE Traffic_Tracking TO Alidorsabue;
+\q
+```
+
+#### 10. Résumé des commandes de vérification rapide
+
+**Si PostgreSQL tourne dans Docker (dans `/opt/Traffic_tracking_app/backend/`)** :
+
+```bash
+# 1. Aller dans le répertoire
+cd /opt/Traffic_tracking_app/backend/
+
+# 2. Statut des conteneurs Docker
+docker-compose ps
+docker ps | grep postgres
+
+# 3. Port en écoute
+sudo netstat -tulpn | grep 5432
+# ou
+sudo ss -tulpn | grep 5432
+
+# 4. Test de connexion via Docker
+docker-compose exec postgres psql -U Alidorsabue -d Traffic_Tracking -c "SELECT version();"
+
+# 5. Test de connexion distante
+psql -h africaits.com -p 5432 -U Alidorsabue -d Traffic_Tracking -c "SELECT version();"
+
+# 6. Vérifier les variables d'environnement
+docker-compose exec postgres env | grep POSTGRES
+
+# 7. Vérifier les logs du conteneur
+docker-compose logs postgres | tail -50
+```
+
+**Si PostgreSQL tourne comme service système** :
+
+```bash
+# 1. Statut PostgreSQL
+sudo systemctl status postgresql
+
+# 2. Port en écoute
+sudo netstat -tulpn | grep 5432
+
+# 3. Test de connexion locale
+psql -U Alidorsabue -d Traffic_Tracking -c "SELECT version();"
+
+# 4. Test de connexion distante
+psql -h africaits.com -p 5432 -U Alidorsabue -d Traffic_Tracking -c "SELECT version();"
+
+# 5. Vérifier la configuration
+sudo grep listen_addresses /etc/postgresql/18/main/postgresql.conf
+sudo grep -E "^host" /etc/postgresql/18/main/pg_hba.conf | tail -5
+```
+
+**Note de sécurité** : Pour la production, il est recommandé de :
+- Limiter les connexions distantes à des IPs spécifiques dans `pg_hba.conf`
+- Utiliser SSL/TLS pour les connexions PostgreSQL
+- Changer les mots de passe par défaut
+- Utiliser un firewall pour restreindre l'accès au port 5432
+
+### Problème : Erreur Airflow - "ValueError: invalid literal for int() with base 10: 'Virgi1996localhost:5432'"
+
+Si vous obtenez cette erreur dans les logs Airflow :
+```
+ValueError: invalid literal for int() with base 10: 'Virgi1996localhost:5432'
+```
+
+**Cause** : Le mot de passe PostgreSQL contient des caractères spéciaux (comme `@`) qui ne sont pas encodés dans l'URL de connexion SQLAlchemy.
+
+**Solution** :
+
+1. **Encoder le mot de passe pour URL** : Les caractères spéciaux doivent être encodés :
+   - `@` devient `%40`
+   - `#` devient `%23`
+   - `%` devient `%25`
+   - etc.
+
+2. **Ajouter la variable dans `.env`** :
+```bash
+# Éditer le fichier .env
+cd /opt/traffic-tracking
+nano .env
+```
+
+Ajoutez cette ligne (remplacez `Virgi@1996` par votre mot de passe avec les caractères encodés) :
+```bash
+# Mot de passe encodé pour URL (nécessaire si le mot de passe contient des caractères spéciaux)
+POSTGRES_PASSWORD_ENCODED=Virgi%401996
+```
+
+3. **Vérifier que `docker-compose.prod.yml` utilise la variable encodée** :
+   - La ligne `AIRFLOW__DATABASE__SQL_ALCHEMY_CONN` doit utiliser `${POSTGRES_PASSWORD_ENCODED}` au lieu de `${POSTGRES_PASSWORD}`
+
+4. **Redémarrer les conteneurs** :
+```bash
+cd /opt/traffic-tracking
+docker-compose -f docker-compose.prod.yml down
+docker-compose -f docker-compose.prod.yml --env-file .env up -d
+```
+
+5. **Vérifier les logs** :
+```bash
+docker-compose -f docker-compose.prod.yml logs -f airflow
+```
+
+**Note** : Le fichier `docker-compose.prod.yml` a déjà été configuré pour utiliser `POSTGRES_PASSWORD_ENCODED` par défaut avec `Virgi%401996`.
+
+### Problème : Réinitialiser la base de données Airflow
+
+Si vous devez réinitialiser complètement la base de données Airflow (supprimer toutes les tables et les recréer) :
+
+**Méthode 1 : Utiliser `airflow db reset` (recommandée)** :
+
+```bash
+cd /opt/traffic-tracking
+
+# Arrêter les conteneurs
+docker-compose -f docker-compose.prod.yml down
+
+# Réinitialiser la base de données via un conteneur temporaire
+docker-compose -f docker-compose.prod.yml --env-file .env run --rm airflow bash -c "
+  airflow db reset --yes &&
+  airflow users create --username ${AIRFLOW_USERNAME:-Alidorsabue} --password ${AIRFLOW_PASSWORD:-Virgi@1996} --firstname ${AIRFLOW_FIRSTNAME:-Alidor} --lastname ${AIRFLOW_LASTNAME:-SABUE} --role Admin --email ${AIRFLOW_EMAIL:-sabuetshibangualidor@gmail.com}
+"
+
+# Redémarrer les services
+docker-compose -f docker-compose.prod.yml --env-file .env up -d
+```
+
+**Méthode 2 : Via le conteneur en cours d'exécution** :
+
+```bash
+cd /opt/traffic-tracking
+
+# Se connecter au conteneur
+docker-compose -f docker-compose.prod.yml exec airflow bash
+
+# Dans le conteneur :
+airflow db reset --yes
+airflow users create --username Alidorsabue --password Virgi@1996 --firstname Alidor --lastname SABUE --role Admin --email alidorsabue@africaits.com
+exit
+
+# Redémarrer
+docker-compose -f docker-compose.prod.yml restart airflow
+```
+
+**Méthode 3 : Suppression manuelle des tables PostgreSQL** :
+
+```bash
+# Se connecter à PostgreSQL et supprimer le schéma public
+psql -h africaits.com -p 5432 -U Alidorsabue -d Traffic_Tracking << EOF
+DROP SCHEMA IF EXISTS public CASCADE;
+CREATE SCHEMA public;
+GRANT ALL ON SCHEMA public TO Alidorsabue;
+GRANT ALL ON SCHEMA public TO public;
+EOF
+
+# Redémarrer le conteneur (il initialisera automatiquement)
+docker-compose -f docker-compose.prod.yml down
+docker-compose -f docker-compose.prod.yml --env-file .env up -d
+```
+
+**Attention** : La réinitialisation supprimera toutes les données Airflow (DAGs, tâches, historique d'exécution, etc.). Les DAGs seront recréés au prochain démarrage si les fichiers sont dans le dossier `dags/`.
 
 ### Problème : Airflow ne s'exécute pas
 
@@ -545,7 +1317,9 @@ sudo apt-get install docker-ce docker-ce-cli containerd.io
 1. Vérifier les logs : `docker-compose -f docker-compose.prod.yml logs airflow`
 2. Vérifier que la base de données est accessible
 3. Vérifier les variables d'environnement Airflow
-4. Redémarrer le conteneur : `docker-compose -f docker-compose.prod.yml restart airflow`
+4. Vérifier que le mot de passe est correctement encodé (voir section ci-dessus)
+5. Réinitialiser la base de données si nécessaire (voir section ci-dessus)
+6. Redémarrer le conteneur : `docker-compose -f docker-compose.prod.yml restart airflow`
 
 ### Problème : Le DAG ne s'exécute pas
 
@@ -554,6 +1328,151 @@ sudo apt-get install docker-ce docker-ce-cli containerd.io
 2. Vérifier les logs du DAG dans l'interface Airflow
 3. Vérifier que le scheduler Airflow est en cours d'exécution
 4. Vérifier les dépendances Python dans `requirements-airflow.txt`
+
+### Problème : Les DAGs ne sont pas reconnus ou ne se chargent pas
+
+Si les nouveaux DAGs séparés (Baseline_DAG, Alerts_DAG) ne sont pas visibles dans l'interface Airflow :
+
+**Vérifications** :
+
+1. **Vérifier que les fichiers sont bien dans le conteneur** :
+
+```bash
+cd /opt/traffic-tracking
+
+# Vérifier les fichiers DAGs dans le conteneur
+docker-compose -f docker-compose.prod.yml exec airflow ls -la /opt/airflow/dags/
+
+# Vous devriez voir :
+# - Alerts_DAG.py
+# - Baseline_DAG.py
+# - Dags.py
+```
+
+2. **Vérifier les erreurs de parsing des DAGs** :
+
+```bash
+# Voir les logs du scheduler Airflow
+docker-compose -f docker-compose.prod.yml logs airflow | grep -i "dag\|error\|import"
+
+# Ou tester le parsing des DAGs manuellement
+docker-compose -f docker-compose.prod.yml exec airflow bash -c "
+  cd /opt/airflow &&
+  python -m py_compile dags/Dags.py &&
+  python -m py_compile dags/Baseline_DAG.py &&
+  python -m py_compile dags/Alerts_DAG.py &&
+  echo 'Tous les fichiers DAGs sont syntaxiquement corrects'
+"
+```
+
+3. **Tester les imports Python** :
+
+```bash
+# Tester les imports dans le conteneur
+docker-compose -f docker-compose.prod.yml exec airflow bash -c "
+  cd /opt/airflow &&
+  python -c 'import sys; sys.path.insert(0, \"/opt/airflow\"); from src.Script_ETL import extract_recent_data; print(\"Import réussi\")'
+"
+```
+
+4. **Forcer le rechargement des DAGs** :
+
+```bash
+# Redémarrer le scheduler Airflow pour forcer le rechargement
+docker-compose -f docker-compose.prod.yml restart airflow
+
+# Ou dans l'interface Airflow, cliquer sur le bouton "Refresh" en haut à droite
+# Ou attendre quelques minutes (le scheduler recharge les DAGs toutes les ~30 secondes)
+```
+
+5. **Vérifier les IDs des DAGs** (doivent être uniques) :
+
+Les DAGs doivent avoir des IDs uniques :
+- `congestion_zone_detection` (dans Dags.py)
+- `traffic_advanced_analysis` (dans Dags.py)
+- `compute_baseline_daily` (dans Baseline_DAG.py)
+- `proactive_alerts` (dans Alerts_DAG.py)
+
+```bash
+# Vérifier les IDs des DAGs
+docker-compose -f docker-compose.prod.yml exec airflow bash -c "
+  grep -h \"^[[:space:]]*'[a-z_]*',\" /opt/airflow/dags/*.py | grep -v '#' | sort
+"
+```
+
+6. **Vérifier les logs spécifiques d'un DAG** :
+
+Dans l'interface Airflow :
+- Cliquer sur un DAG
+- Voir la section "Info" pour les erreurs de parsing
+- Voir les logs du scheduler : Admin → Logs → scheduler
+
+**Si les DAGs sont toujours invisibles** :
+
+```bash
+# Arrêter complètement et redémarrer
+cd /opt/traffic-tracking
+docker-compose -f docker-compose.prod.yml down
+docker-compose -f docker-compose.prod.yml --env-file .env up -d
+
+# Attendre 2-3 minutes puis vérifier les logs
+docker-compose -f docker-compose.prod.yml logs --tail=100 airflow | grep -i dag
+```
+
+### Problème : Les tâches échouent (erreurs dans les logs)
+
+Si les tâches sont en rouge/orange dans l'interface Airflow :
+
+**Vérifications** :
+
+1. **Voir les logs détaillés d'une tâche** :
+
+Dans l'interface Airflow :
+- Cliquer sur une tâche en échec (carré rouge)
+- Cliquer sur "Log" pour voir l'erreur complète
+
+2. **Erreurs communes** :
+
+**Erreur : "ModuleNotFoundError"** :
+```bash
+# Installer les dépendances manquantes dans le conteneur
+docker-compose -f docker-compose.prod.yml exec airflow pip install <module-manquant>
+```
+
+**Erreur : "Connection refused" pour PostgreSQL** :
+- Vérifier que PostgreSQL est accessible (voir section "Erreur de connexion à PostgreSQL")
+- Vérifier les variables d'environnement POSTGRES_* dans le conteneur
+
+**Erreur : "No such file or directory"** :
+- Vérifier les chemins dans le code (doivent être `/opt/airflow/...`)
+- Vérifier que les fichiers existent dans le conteneur
+
+**Erreur : "Out of Memory" (code 137)** :
+- Augmenter la limite de mémoire dans docker-compose.prod.yml
+- Ajouter du swap (voir section précédente)
+
+3. **Tester manuellement une tâche** :
+
+```bash
+# Tester une fonction Python directement
+docker-compose -f docker-compose.prod.yml exec airflow bash -c "
+  cd /opt/airflow &&
+  python -c '
+import sys
+sys.path.insert(0, \"/opt/airflow\")
+from src.Script_ETL import extract_recent_data
+df = extract_recent_data()
+print(f\"Données extraites: {len(df)} lignes\")
+'"
+```
+
+4. **Vérifier les permissions** :
+
+```bash
+# Vérifier que les fichiers sont accessibles
+docker-compose -f docker-compose.prod.yml exec airflow ls -la /opt/airflow/dags/
+docker-compose -f docker-compose.prod.yml exec airflow ls -la /opt/airflow/src/
+```
 
 ### Problème : Les alertes WhatsApp ne s'envoient pas
 

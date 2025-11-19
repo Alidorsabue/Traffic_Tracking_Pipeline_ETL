@@ -257,47 +257,28 @@ def load_predictions_task(**context):
         print(f"load_predictions_task: Échec du chargement")
         return "error"
 
-def send_alerts_task(**context):
-    """
-    Analyse les congestions et envoie des alertes WhatsApp aux chauffeurs concernés.
-    Cette tâche s'exécute après le chargement des données edge_agg pour avoir les dernières données.
-    """
-    # Import lazy pour éviter le timeout au chargement du DAG
-    from src.alert import run_alerts
-    
-    result = run_alerts()
-    print(f"Résultat des alertes: {result}")
-    return result
+# DAG 1: Détection de congestion rapide (toutes les 10 minutes) - SANS mapmatching
+# Ce DAG est léger et rapide, utilise uniquement les coordonnées GPS brutes
 
 with DAG(
-    'congestion_etl_modular',
+    'congestion_zone_detection',
     default_args=default_args,
-    description='Pipeline ETL pour la détection de congestion et l\'analyse prédictive du trafic',
+    description='Détection rapide de congestion par zones géographiques (sans mapmatching)',
     schedule_interval='*/10 * * * *',  # Exécution toutes les 10 minutes
     catchup=False,
-    tags=['congestion', 'traffic', 'prediction']
-) as dag:
+    tags=['congestion', 'traffic', 'quick']
+) as dag_congestion:
 
-    # Tâche d'extraction
     extract = PythonOperator(
         task_id='extract_data',
         python_callable=extract_task,
     )
 
-    # Tâche de nettoyage
     clean = PythonOperator(
         task_id='clean_data',
         python_callable=clean_task,
     )
 
-    # Tâche de map matching (avec timeout et retries augmentés)
-    mapmatching = PythonOperator(
-        task_id='mapmatching',
-        python_callable=mapmatching_task,
-        **mapmatching_args,
-    )
-
-    # Branche 1: Détection de congestion (basée sur les données nettoyées)
     detect = PythonOperator(
         task_id='detect_congestion',
         python_callable=detect_congestion_task,
@@ -313,7 +294,36 @@ with DAG(
         python_callable=load_congestion_task,
     )
 
-    # Branche 2: Agrégation par edge pour la prédiction (basée sur les données avec map matching)
+    extract >> clean >> detect >> aggregate_zone >> load_congestion
+
+# DAG 2: Mapmatching et analyse avancée (toutes les 30 minutes) - AVEC mapmatching
+# Ce DAG est plus lourd, nécessite mapmatching pour l'agrégation par edge, ML et alertes
+
+with DAG(
+    'traffic_advanced_analysis',
+    default_args=default_args,
+    description='Analyse avancée du trafic avec mapmatching, ML et alertes',
+    schedule_interval='*/30 * * * *',  # Exécution toutes les 30 minutes
+    catchup=False,
+    tags=['traffic', 'prediction', 'mapmatching', 'alerts']
+) as dag_advanced:
+
+    extract_advanced = PythonOperator(
+        task_id='extract_data',
+        python_callable=extract_task,
+    )
+
+    clean_advanced = PythonOperator(
+        task_id='clean_data',
+        python_callable=clean_task,
+    )
+
+    mapmatching = PythonOperator(
+        task_id='mapmatching',
+        python_callable=mapmatching_task,
+        **mapmatching_args,
+    )
+
     aggregate_edge = PythonOperator(
         task_id='aggregate_edge',
         python_callable=aggregate_by_edge_task,
@@ -324,7 +334,6 @@ with DAG(
         python_callable=load_edge_agg_task,
     )
 
-    # Branche 3: Machine Learning - Entraînement et Prédiction
     train_ml = PythonOperator(
         task_id='train_model',
         python_callable=train_model_task,
@@ -340,39 +349,18 @@ with DAG(
         python_callable=load_predictions_task,
     )
 
-    # Branche 4: Alertes aux chauffeurs (s'exécute après le chargement des données edge_agg ET load_congestion)
-    send_alerts = PythonOperator(
-        task_id='send_alerts',
-        python_callable=send_alerts_task,
-        execution_timeout=timedelta(minutes=10),  # Timeout de 10 minutes pour l'envoi des alertes
-        retries=1,  # Retry en cas d'échec temporaire
-    )
-
-    # Définir l'ordre d'exécution des tâches
-    # Flux principal: extract -> clean -> mapmatching
-    # Puis deux branches parallèles:
-    #   - Branche 1: detect -> aggregate_zone -> load_congestion (données nettoyées) - INDÉPENDANTE
-    #   - Branche 2: aggregate_edge -> load_edge_agg (données avec map matching) - OPTIONNELLE
-    #   - Branche 3: train_model -> predict -> load_predictions (ML - exécutée après edge_agg) - OPTIONNELLE
+    extract_advanced >> clean_advanced >> mapmatching >> aggregate_edge >> load_edge_agg
     
-    extract >> clean >> [mapmatching, detect]
+    # ML et prédictions s'exécutent après edge_agg
+    load_edge_agg >> train_ml >> predict >> load_predictions
     
-    # Branche congestion (INDÉPENDANTE - continue même si mapmatching échoue)
-    detect >> aggregate_zone >> load_congestion
+    # Note: Les alertes proactives sont maintenant gérées par le DAG séparé 'proactive_alerts'
+    # qui s'exécute toutes les 5 minutes pour une meilleure réactivité
+    # Le DAG proactive_alerts ne nécessite pas mapmatching, il utilise directement edge_agg
     
-    # Branche edge aggregation puis ML (OPTIONNELLE - utilise trigger_rule='all_done')
-    # Cela permet de continuer même si mapmatching échoue ou retourne des données vides
-    mapmatching >> aggregate_edge >> load_edge_agg >> train_ml >> predict >> load_predictions
-    
-    # Branche alertes (s'exécute après le chargement des données edge_agg ET load_congestion)
-    # Utilise trigger_rule pour s'exécuter même si l'une des tâches échoue
-    [load_edge_agg, load_congestion] >> send_alerts
-    
-    # Rendre les tâches dépendantes de mapmatching plus tolérantes
-    # 'all_done' permet l'exécution même si les tâches précédentes ont échoué ou été ignorées
+    # Rendre les tâches tolérantes aux échecs
     aggregate_edge.trigger_rule = 'all_done'
     load_edge_agg.trigger_rule = 'all_done'
     train_ml.trigger_rule = 'all_done'
     predict.trigger_rule = 'all_done'
     load_predictions.trigger_rule = 'all_done'
-    send_alerts.trigger_rule = 'all_done'

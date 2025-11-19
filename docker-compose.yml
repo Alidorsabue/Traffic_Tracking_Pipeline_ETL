@@ -28,7 +28,6 @@ services:
       - ./plugins:/opt/airflow/plugins
       - ./src:/opt/airflow/src
       - ./models:/opt/airflow/models
-      - ./cache:/opt/airflow/cache
       - ./requirements-airflow.txt:/requirements-airflow.txt
     ports:
       - "8081:8080"

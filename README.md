@@ -723,7 +723,7 @@ Ce projet est sous licence [spécifier la licence].
 ## Contact
 
 Pour toute question ou support :
-- **Email** : sabuetshibangualidor@gmail.com
+- **Email** : alidorsabue@africaits.com
 - **Auteur** : Alidor SABUE
 
 ---

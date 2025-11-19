@@ -1,8 +1,8 @@
 pandas
 psycopg2-binary
-osmnx
+shapely>=2.0.0
 geopandas
-shapely
+osmnx
 numpy
 sqlalchemy
 scikit-learn
