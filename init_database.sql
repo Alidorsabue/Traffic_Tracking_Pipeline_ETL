@@ -95,3 +95,27 @@ CREATE TABLE IF NOT EXISTS drivers_registry (
 CREATE INDEX IF NOT EXISTS idx_drivers_registry_driver_id ON drivers_registry(driver_id);
 CREATE INDEX IF NOT EXISTS idx_drivers_registry_edge ON drivers_registry(current_edge_u, current_edge_v);
 CREATE INDEX IF NOT EXISTS idx_drivers_registry_notifications ON drivers_registry(notifications_enabled, current_edge_u, current_edge_v);
+
+-- Création de la table mapmatching_cache pour stocker les résultats de map matching
+-- Cette table permet de réutiliser les résultats de map matching au lieu de les recalculer à chaque fois
+CREATE TABLE IF NOT EXISTS mapmatching_cache (
+    id SERIAL PRIMARY KEY,
+    driver_id VARCHAR(50) NOT NULL,
+    latitude DECIMAL(10, 8) NOT NULL,
+    longitude DECIMAL(11, 8) NOT NULL,
+    speed DECIMAL(5, 2) NOT NULL,
+    timestamp TIMESTAMP NOT NULL,
+    edge_u BIGINT,
+    edge_v BIGINT,
+    osmid BIGINT,
+    road_name VARCHAR(255),
+    distance_to_road DECIMAL(10, 4),
+    processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(driver_id, timestamp)
+);
+
+-- Index pour améliorer les performances des requêtes sur le cache
+CREATE INDEX IF NOT EXISTS idx_mapmatching_cache_timestamp ON mapmatching_cache(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_mapmatching_cache_processed_at ON mapmatching_cache(processed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_mapmatching_cache_edge ON mapmatching_cache(edge_u, edge_v);
+CREATE INDEX IF NOT EXISTS idx_mapmatching_cache_driver_id ON mapmatching_cache(driver_id);

@@ -68,6 +68,51 @@ def extract_recent_data():
     
     return df
 
+def load_mapmatching_from_cache(hours_back=1):
+    """
+    Charge les résultats de map matching depuis le cache.
+    
+    Parameters:
+    -----------
+    hours_back : int
+        Nombre d'heures en arrière pour récupérer les données (par défaut: 1 heure)
+    
+    Returns:
+    --------
+    pandas.DataFrame
+        DataFrame avec les colonnes driver_id, latitude, longitude, speed, timestamp, edge_u, edge_v, etc.
+        DataFrame vide si aucune donnée trouvée
+    """
+    conn = get_db_connection()
+    
+    try:
+        query = f"""
+            SELECT driver_id, latitude, longitude, speed, timestamp, 
+                   edge_u, edge_v, osmid, road_name, distance_to_road
+            FROM mapmatching_cache
+            WHERE processed_at > NOW() - INTERVAL '{hours_back} hours'
+              AND timestamp > NOW() - INTERVAL '{hours_back} hours'
+            ORDER BY timestamp DESC
+        """
+        
+        # Utiliser les mêmes heures pour processed_at et timestamp pour cohérence
+        df = pd.read_sql(query, conn)
+        
+        if df.empty:
+            print(f"Aucune donnée dans mapmatching_cache pour les {hours_back} dernières heures")
+            return pd.DataFrame()
+        
+        print(f"✅ {len(df)} points chargés depuis mapmatching_cache")
+        return df
+        
+    except Exception as e:
+        print(f"Erreur lors du chargement depuis mapmatching_cache: {e}")
+        import traceback
+        traceback.print_exc()
+        return pd.DataFrame()
+    finally:
+        conn.close()
+
 # Transformation (nettoyage + agrégation + détection de congestion)
     # Supprimer les doublons, 
     # Supprimer les vitesses nulles ou aberrantes (ex. > 150 km/h)

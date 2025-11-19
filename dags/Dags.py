@@ -7,7 +7,8 @@ sys.path.insert(0, '/opt/airflow')
 
 from src.Script_ETL import (
     extract_recent_data, clean_data, detect_congestion, 
-    aggregate_by_zone, load_to_db, aggregate_by_edge, load_edge_agg_to_db, load_predictions_to_db
+    aggregate_by_zone, load_to_db, aggregate_by_edge, load_edge_agg_to_db, load_predictions_to_db,
+    load_mapmatching_from_cache
 )
 # Note: Les imports de mapmatching et model sont déplacés dans les fonctions pour éviter
 # les timeouts lors du chargement du DAG (osmnx est très lourd à importer)
@@ -22,14 +23,15 @@ default_args = {
     'email_on_retry': False,
 }
 
-# Args spécifiques pour mapmatching (tâche longue et coûteuse)
+# Args spécifiques pour mapmatching (maintenant rapide car utilise le cache)
+# OPTIMISATION: Plus besoin de timeout strict car on charge depuis la base de données
 mapmatching_args = {
     'owner': 'congestion_team',
     'depends_on_past': False,
     'start_date': datetime(2024, 1, 1),
-    'retries': 2,  # Plus de retries pour mapmatching
-    'retry_delay': timedelta(minutes=10),
-    'execution_timeout': timedelta(minutes=15),  # Timeout de 15 minutes
+    'retries': 1,
+    'retry_delay': timedelta(minutes=2),
+    'execution_timeout': timedelta(minutes=2),  # Timeout court car c'est juste une lecture DB
     'email_on_failure': False,
     'email_on_retry': False,
 }
@@ -52,33 +54,42 @@ def clean_task(**context):
 
 def mapmatching_task(**context):
     """
-    Associe les points GPS aux tronçons de route (map matching).
-    Gestion d'erreur robuste pour éviter de bloquer le pipeline.
+    Charge les résultats de map matching depuis le cache (mapmatching_cache).
+    OPTIMISATION: Utilise le cache au lieu d'exécuter mapmatching à chaque fois.
+    Le map matching est effectué une fois par heure par le DAG mapmatching_cache_hourly.
+    Cette tâche est maintenant ultra-rapide car elle charge simplement depuis la base de données.
     """
     try:
-        # Import lazy pour éviter le timeout au chargement du DAG
-        from src.mapmatching import effectuer_mapmatching
+        print("📦 Chargement des résultats de map matching depuis le cache...")
         
-        ti = context['ti']
-        df_clean = ti.xcom_pull(task_ids='clean_data')
-        if df_clean is None or df_clean.empty:
-            print("Aucune donnée à traiter pour mapmatching")
+        # Charger depuis le cache (dernière heure)
+        df_matched = load_mapmatching_from_cache(hours_back=1)
+        
+        if df_matched.empty:
+            print("⚠️ Aucune donnée dans le cache mapmatching. Le DAG mapmatching_cache_hourly doit s'exécuter pour remplir le cache.")
+            print("   Note: Le pipeline continuera mais sans données matchées pour l'agrégation par edge.")
             return pd.DataFrame()
-        if isinstance(df_clean, pd.DataFrame):
-            # OPTIMISATION: Réduire drastiquement max_points pour éviter les timeouts
-            # 30 points au lieu de 50 pour réduire encore plus le temps d'exécution
-            print(f"Début mapmatching sur {len(df_clean)} points (limité à 30)")
-            df_matched = effectuer_mapmatching(df_clean, max_points=30, max_distance=50)
-            matched_count = df_matched['edge_u'].notna().sum() if 'edge_u' in df_matched.columns else 0
-            print(f"Mapmatching terminé: {matched_count}/{len(df_matched)} points matchés")
-            return df_matched
-        return pd.DataFrame()
+        
+        # Vérifier que les colonnes nécessaires sont présentes
+        required_cols = ['edge_u', 'edge_v', 'speed', 'timestamp']
+        missing_cols = set(required_cols) - set(df_matched.columns)
+        if missing_cols:
+            print(f"⚠️ Colonnes manquantes dans le cache: {missing_cols}")
+            return pd.DataFrame()
+        
+        # Compter les points matchés
+        matched_count = df_matched['edge_u'].notna().sum() if 'edge_u' in df_matched.columns else 0
+        print(f"✅ {len(df_matched)} points chargés depuis le cache: {matched_count} matchés ({matched_count/len(df_matched)*100:.1f}%)")
+        
+        return df_matched
+        
     except Exception as e:
-        print(f"Erreur dans mapmatching: {e}")
+        print(f"⚠️ Erreur lors du chargement depuis le cache: {e}")
         import traceback
         traceback.print_exc()
         # Retourner un DataFrame vide plutôt que de faire échouer la tâche
         # Cela permet aux autres branches du pipeline de continuer
+        # Les tâches suivantes avec trigger_rule='all_done' s'exécuteront quand même
         return pd.DataFrame()
 
 def detect_congestion_task(**context):
@@ -322,6 +333,9 @@ with DAG(
         task_id='mapmatching',
         python_callable=mapmatching_task,
         **mapmatching_args,
+        # OPTIMISATION: Permettre à la tâche suivante de continuer même si mapmatching timeout
+        # Retourner un DataFrame vide plutôt que d'échouer pour ne pas bloquer
+        do_xcom_push=True,  # Push le résultat même en cas d'erreur
     )
 
     aggregate_edge = PythonOperator(
@@ -349,18 +363,26 @@ with DAG(
         python_callable=load_predictions_task,
     )
 
+    # OPTIMISATION: Permettre aux tâches suivantes de s'exécuter même si mapmatching échoue ou timeout
+    # Utiliser 'all_done' pour que aggregate_edge s'exécute même si mapmatching échoue
     extract_advanced >> clean_advanced >> mapmatching >> aggregate_edge >> load_edge_agg
     
     # ML et prédictions s'exécutent après edge_agg
     load_edge_agg >> train_ml >> predict >> load_predictions
     
     # Note: Les alertes proactives sont maintenant gérées par le DAG séparé 'proactive_alerts'
-    # qui s'exécute toutes les 5 minutes pour une meilleure réactivité
+    # qui s'exécute toutes les 10 minutes pour une meilleure réactivité
     # Le DAG proactive_alerts ne nécessite pas mapmatching, il utilise directement edge_agg
     
-    # Rendre les tâches tolérantes aux échecs
+    # Rendre les tâches tolérantes aux échecs - elles s'exécutent même si mapmatching échoue
+    # 'all_done' = s'exécute même si les tâches précédentes ont échoué ou timeout
     aggregate_edge.trigger_rule = 'all_done'
     load_edge_agg.trigger_rule = 'all_done'
     train_ml.trigger_rule = 'all_done'
     predict.trigger_rule = 'all_done'
+    load_predictions.trigger_rule = 'all_done'
+    
+    # OPTIMISATION: Permettre à aggregate_edge de s'exécuter même si mapmatching timeout
+    # Si mapmatching échoue ou timeout, aggregate_edge recevra un DataFrame vide
+    # et retournera un DataFrame vide sans bloquer le reste du pipeline
     load_predictions.trigger_rule = 'all_done'
