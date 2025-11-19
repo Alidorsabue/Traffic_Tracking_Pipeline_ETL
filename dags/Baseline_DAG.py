@@ -23,7 +23,8 @@ default_args = {
 def compute_baseline_task(**context):
     """
     Calcule la baseline horaire de vitesse pour chaque tronçon.
-    Utilise les 30 derniers jours d'historique depuis la table edge_agg.
+    Utilise automatiquement tous les jours disponibles dans edge_agg.
+    Si moins de 30 jours sont disponibles, utilise tous les jours disponibles.
     Sauvegarde le résultat dans la table edge_hourly_baseline.
     """
     try:
@@ -31,9 +32,12 @@ def compute_baseline_task(**context):
         from src.baseline import compute_hourly_baseline
         
         print("Début du calcul de la baseline horaire...")
+        print("   Détection automatique des jours disponibles...")
         
-        # Calculer la baseline avec les 30 derniers jours
-        baseline = compute_hourly_baseline(history_days=30)
+        # Calculer la baseline avec détection automatique des jours disponibles
+        # history_days=None permet la détection automatique
+        # min_days=1 permet de calculer même avec seulement 1 jour de données
+        baseline = compute_hourly_baseline(history_days=None, min_days=1)
         
         if baseline is not None and not baseline.empty:
             print(f"Baseline calculée avec succès: {len(baseline)} lignes")
@@ -42,7 +46,8 @@ def compute_baseline_task(**context):
             return "success"
         else:
             print("Échec du calcul de la baseline ou baseline vide")
-            print("   Vérifier que la table edge_agg contient des données des 30 derniers jours")
+            print("   Vérifier que la table edge_agg contient des données")
+            print("   La baseline nécessite au moins 1 jour de données dans edge_agg")
             return "failed"
             
     except Exception as e:
