@@ -38,8 +38,31 @@ mapmatching_args = {
 
 def extract_task(**context):
     """Extrait les données GPS récentes de la base de données."""
-    df = extract_recent_data()
-    return df
+    try:
+        print("🔍 Extraction des données GPS récentes...")
+        df = extract_recent_data()
+        
+        if df is None:
+            print("❌ ERREUR: extract_recent_data() a retourné None")
+            return pd.DataFrame()
+        
+        if isinstance(df, pd.DataFrame):
+            if df.empty:
+                print("⚠️ ATTENTION: Aucune donnée GPS trouvée dans la table gps_points")
+                print("   Vérifier que l'app mobile envoie des données à la base de données")
+                return pd.DataFrame()
+            else:
+                print(f"✅ {len(df)} lignes GPS extraites")
+                print(f"   Période: {df['timestamp'].min()} à {df['timestamp'].max()}")
+                return df
+        else:
+            print(f"❌ ERREUR: extract_recent_data() a retourné un type inattendu: {type(df)}")
+            return pd.DataFrame()
+    except Exception as e:
+        print(f"❌ ERREUR lors de l'extraction: {e}")
+        import traceback
+        traceback.print_exc()
+        return pd.DataFrame()
 
 def clean_task(**context):
     """Nettoie les données GPS (suppression des doublons, filtrage des vitesses aberrantes)."""

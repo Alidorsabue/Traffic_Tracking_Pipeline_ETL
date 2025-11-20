@@ -11,62 +11,172 @@ def get_db_connection():
     - Dans Docker (Airflow): utilise le service postgres si disponible
     - En local: utilise les variables d'environnement ou valeurs par défaut pour dev
     """
-    # Détecter si on est dans Docker (environnement Airflow)
-    is_docker = os.path.exists('/.dockerenv') or os.environ.get('AIRFLOW_HOME') is not None
+    import locale
+    import sys
     
-    # Récupérer les valeurs depuis les variables d'environnement
-    # En production, utiliser africaits.com par défaut
-    if is_docker:
-        # Dans Docker, utiliser le serveur de production par défaut
-        host = os.getenv('POSTGRES_HOST', 'africaits.com')
-        port = int(os.getenv('POSTGRES_PORT', '5432'))
-    else:
-        # En local, utiliser localhost
-        host = os.getenv('POSTGRES_HOST', 'localhost')
-        port = int(os.getenv('POSTGRES_PORT', '5433'))
+    def safe_decode(value, default=''):
+        """Décode une valeur en UTF-8 en gérant plusieurs encodages."""
+        if value is None:
+            return default
+        if isinstance(value, str):
+            return value
+        if isinstance(value, bytes):
+            # Essayer UTF-8 d'abord
+            try:
+                return value.decode('utf-8')
+            except UnicodeDecodeError:
+                # Essayer l'encodage du système (Windows-1252, latin-1, etc.)
+                try:
+                    return value.decode(locale.getpreferredencoding())
+                except (UnicodeDecodeError, LookupError):
+                    try:
+                        return value.decode('latin-1')  # Fallback: latin-1 peut décoder n'importe quel byte
+                    except:
+                        return value.decode('utf-8', errors='replace')  # Dernier recours: remplacer les erreurs
+        return str(value)
     
-    database = os.getenv('POSTGRES_DB', 'Traffic_Tracking')
-    user = os.getenv('POSTGRES_USER', 'Alidorsabue')
-    password = os.getenv('POSTGRES_PASSWORD', 'Virgi@1996')
-    
-    # En production, vérifier que les credentials sont configurés
-    if os.getenv('ENVIRONMENT') == 'production' and password in ['postgres', '']:
-        raise ValueError("POSTGRES_PASSWORD doit être configuré en production !")
-    
-    conn = psycopg2.connect(
-        host=host,
-        port=port,
-        database=database,
-        user=user,
-        password=password
-    )
-    return conn
+    try:
+        # Détecter si on est dans Docker (environnement Airflow)
+        is_docker = os.path.exists('/.dockerenv') or os.environ.get('AIRFLOW_HOME') is not None
+        
+        # Récupérer les valeurs depuis les variables d'environnement
+        # En production, utiliser africaits.com par défaut
+        if is_docker:
+            # Dans Docker, utiliser le serveur de production par défaut
+            host_raw = os.getenv('POSTGRES_HOST', 'africaits.com')
+            port_raw = os.getenv('POSTGRES_PORT', '5432')
+        else:
+            # En local, utiliser localhost (mais peut être surchargé par env vars)
+            host_raw = os.getenv('POSTGRES_HOST', 'africaits.com')  # Utiliser africaits.com même en local si non défini
+            port_raw = os.getenv('POSTGRES_PORT', '5432')
+        
+        database_raw = os.getenv('POSTGRES_DB', 'Traffic_Tracking')
+        user_raw = os.getenv('POSTGRES_USER', 'Alidorsabue')
+        password_raw = os.getenv('POSTGRES_PASSWORD', 'Virgi@1996')
+        
+        # Décoder toutes les valeurs en gérant les problèmes d'encodage
+        host = safe_decode(host_raw)
+        port = int(safe_decode(port_raw, '5432'))
+        database = safe_decode(database_raw)
+        user = safe_decode(user_raw)
+        password = safe_decode(password_raw)
+        
+        # En production, vérifier que les credentials sont configurés
+        if os.getenv('ENVIRONMENT') == 'production' and password in ['postgres', '']:
+            raise ValueError("POSTGRES_PASSWORD doit être configuré en production !")
+        
+        # Convertir tout en str pour éviter les problèmes
+        host = str(host) if host else 'localhost'
+        database = str(database) if database else 'Traffic_Tracking'
+        user = str(user) if user else 'postgres'
+        password = str(password) if password else ''
+        
+        # Utiliser des paramètres explicites plutôt qu'un DSN pour éviter les problèmes d'encodage
+        # Ne pas utiliser de DSN string qui peut causer des problèmes d'encodage
+        conn = psycopg2.connect(
+            host=host,
+            port=port,
+            database=database,
+            user=user,
+            password=password,
+            client_encoding='UTF8',
+            connect_timeout=10
+        )
+        return conn
+    except UnicodeDecodeError as e:
+        print(f"❌ ERREUR d'encodage lors de la connexion à la base de données: {e}")
+        print(f"   Position de l'erreur: {e.start if hasattr(e, 'start') else 'N/A'}")
+        print(f"   Vérifier que les variables d'environnement sont correctement configurées")
+        print(f"   Solution: Définir les variables d'environnement explicitement en UTF-8")
+        raise
+    except psycopg2.OperationalError as e:
+        print(f"❌ ERREUR de connexion à la base de données: {e}")
+        print(f"   Host: {host if 'host' in locals() else 'N/A'}")
+        print(f"   Port: {port if 'port' in locals() else 'N/A'}")
+        print(f"   Database: {database if 'database' in locals() else 'N/A'}")
+        print(f"   User: {user if 'user' in locals() else 'N/A'}")
+        raise
+    except Exception as e:
+        print(f"❌ ERREUR lors de la connexion à la base de données: {type(e).__name__}: {e}")
+        print(f"   Host: {host if 'host' in locals() else 'N/A'}")
+        print(f"   Port: {port if 'port' in locals() else 'N/A'}")
+        print(f"   Database: {database if 'database' in locals() else 'N/A'}")
+        print(f"   User: {user if 'user' in locals() else 'N/A'}")
+        raise
 
 def extract_recent_data():
-    conn = get_db_connection()
-    query = """
-    SELECT driver_id, latitude, longitude, speed, timestamp
-    FROM gps_points
-    WHERE timestamp > NOW() - INTERVAL '30 minutes'
-    ORDER BY timestamp DESC
-    LIMIT 1000;
     """
-    df = pd.read_sql(query, conn)
-    conn.close()
+    Extrait les données GPS récentes de la table gps_points.
     
-    # Si pas de données récentes, charger toutes les données disponibles
-    if df.empty:
+    Returns:
+    --------
+    pandas.DataFrame
+        DataFrame avec les colonnes driver_id, latitude, longitude, speed, timestamp
+        DataFrame vide si aucune donnée trouvée
+    """
+    try:
         conn = get_db_connection()
-        query_all = """
+        
+        # Vérifier d'abord si la table existe et contient des données
+        check_query = """
+        SELECT COUNT(*) as total_count,
+               MAX(timestamp) as latest_timestamp
+        FROM gps_points
+        """
+        check_result = pd.read_sql(check_query, conn)
+        
+        if check_result.empty or check_result['total_count'].iloc[0] == 0:
+            print("⚠️ La table gps_points est vide ou n'existe pas")
+            conn.close()
+            return pd.DataFrame()
+        
+        total_count = int(check_result['total_count'].iloc[0])
+        latest_timestamp = check_result['latest_timestamp'].iloc[0]
+        print(f"📊 Table gps_points: {total_count} lignes au total, dernière donnée: {latest_timestamp}")
+        
+        # Essayer d'abord les 30 dernières minutes
+        query = """
         SELECT driver_id, latitude, longitude, speed, timestamp
         FROM gps_points
+        WHERE timestamp > NOW() - INTERVAL '30 minutes'
         ORDER BY timestamp DESC
-        LIMIT 1000
+        LIMIT 1000;
         """
-        df = pd.read_sql(query_all, conn)
+        df = pd.read_sql(query, conn)
         conn.close()
-    
-    return df
+        
+        # Si pas de données récentes, charger toutes les données disponibles (récentes)
+        if df.empty:
+            print("⚠️ Aucune donnée dans les 30 dernières minutes, récupération de toutes les données disponibles...")
+            conn = get_db_connection()
+            query_all = """
+            SELECT driver_id, latitude, longitude, speed, timestamp
+            FROM gps_points
+            WHERE timestamp > NOW() - INTERVAL '24 hours'
+            ORDER BY timestamp DESC
+            LIMIT 1000
+            """
+            df = pd.read_sql(query_all, conn)
+            conn.close()
+            
+            if df.empty:
+                print("⚠️ Aucune donnée trouvée même dans les 24 dernières heures")
+                print("   Vérifier que l'app mobile envoie des données à la base de données")
+            else:
+                print(f"✅ {len(df)} lignes récupérées (dernières 24 heures)")
+        
+        return df
+        
+    except Exception as e:
+        print(f"❌ ERREUR lors de l'extraction des données GPS: {e}")
+        import traceback
+        traceback.print_exc()
+        try:
+            if conn:
+                conn.close()
+        except:
+            pass
+        return pd.DataFrame()
 
 def load_mapmatching_from_cache(hours_back=1):
     """
