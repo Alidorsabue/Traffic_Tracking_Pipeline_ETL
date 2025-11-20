@@ -27,43 +27,122 @@ ox.settings.cache_folder = cache_dir
 _cached_network = None
 _cached_place = None
 
-def telecharger_reseau(place="Kinshasa, Democratic Republic of the Congo", network_type="drive"):
+def charger_reseau_depuis_db():
     """
-    Télécharge le réseau routier pour un lieu donné.
+    Charge le réseau routier depuis PostgreSQL au lieu de le télécharger.
+    Version optimisée qui utilise PostGIS pour des requêtes spatiales rapides.
+    
+    Returns:
+    --------
+    tuple (nodes_gdf, edges_gdf) or None
+        GeoDataFrames des nœuds et arêtes, ou None si erreur
+    """
+    try:
+        from src.Script_ETL import get_db_connection
+        from shapely import wkt
+        
+        conn = get_db_connection()
+        
+        # Charger les nœuds
+        nodes_query = """
+            SELECT osmid, ST_AsText(geometry) as geometry_wkt, x, y
+            FROM road_network_nodes
+        """
+        nodes_df = pd.read_sql(nodes_query, conn)
+        
+        if nodes_df.empty:
+            print("⚠️ Aucun nœud trouvé dans road_network_nodes")
+            print("   Exécuter scripts/load_road_network_to_db.py pour charger le réseau routier")
+            conn.close()
+            return None
+        
+        # Convertir la géométrie WKT en objets Shapely
+        nodes_df['geometry'] = nodes_df['geometry_wkt'].apply(wkt.loads)
+        nodes_gdf = gpd.GeoDataFrame(nodes_df.drop(columns=['geometry_wkt']), geometry='geometry', crs='EPSG:4326')
+        nodes_gdf = nodes_gdf.set_index('osmid')
+        
+        # Charger les arêtes
+        edges_query = """
+            SELECT u, v, osmid, name, highway, ST_AsText(geometry) as geometry_wkt, length_m
+            FROM road_network_edges
+        """
+        edges_df = pd.read_sql(edges_query, conn)
+        
+        if edges_df.empty:
+            print("⚠️ Aucune arête trouvée dans road_network_edges")
+            print("   Exécuter scripts/load_road_network_to_db.py pour charger le réseau routier")
+            conn.close()
+            return None
+        
+        # Convertir la géométrie WKT en objets Shapely
+        edges_df['geometry'] = edges_df['geometry_wkt'].apply(wkt.loads)
+        edges_gdf = gpd.GeoDataFrame(edges_df.drop(columns=['geometry_wkt']), geometry='geometry', crs='EPSG:4326')
+        edges_gdf = edges_gdf.set_index(['u', 'v'])
+        
+        conn.close()
+        
+        print(f"✅ Réseau routier chargé depuis PostgreSQL: {len(nodes_gdf)} nœuds, {len(edges_gdf)} arêtes")
+        return nodes_gdf, edges_gdf
+        
+    except Exception as e:
+        print(f"⚠️ Erreur lors du chargement depuis PostgreSQL: {e}")
+        print("   Fallback vers téléchargement depuis OpenStreetMap...")
+        import traceback
+        traceback.print_exc()
+        return None
 
+def telecharger_reseau(place="Kinshasa, Democratic Republic of the Congo", network_type="drive", use_db=True):
+    """
+    Télécharge ou charge le réseau routier.
+    
     Parameters:
     -----------
     place : str
         Nom du lieu (par défaut: Kinshasa)
     network_type : str
         Type de réseau ('drive', 'walk', 'bike', 'all')
+    use_db : bool
+        Si True, essaie de charger depuis PostgreSQL d'abord. Si False ou si erreur, télécharge depuis OSM.
 
     Returns:
     --------
-    networkx.MultiDiGraph
-        Graphe du réseau routier
+    networkx.MultiDiGraph or True
+        Graphe du réseau routier si téléchargé depuis OSM, True si chargé depuis DB
     """
     global _cached_network, _cached_place
 
     # Utiliser le cache si le même lieu est demandé
-    if _cached_network is not None and _cached_place == place:
-        return _cached_network['graph']
+    if _cached_network is not None and _cached_place == place and 'edges' in _cached_network:
+        if 'graph' in _cached_network:
+            return _cached_network['graph']
+        else:
+            # Cache depuis DB (pas de graphe, juste edges)
+            return True
 
+    # Essayer d'abord de charger depuis PostgreSQL
+    if use_db:
+        result = charger_reseau_depuis_db()
+        if result is not None:
+            nodes_gdf, edges_gdf = result
+            # Mettre en cache les GeoDataFrames (pas besoin du graphe NetworkX)
+            _cached_network = {'nodes': nodes_gdf, 'edges': edges_gdf}
+            _cached_place = place
+            return True  # Indique que les données sont chargées depuis DB
+
+    # Si échec ou use_db=False, télécharger depuis OSM (comportement original)
     try:
-        # Télécharger le réseau routier
+        if use_db:
+            print("⚠️ Chargement depuis PostgreSQL échoué, téléchargement depuis OSM...")
+        else:
+            print("📥 Téléchargement du réseau routier depuis OpenStreetMap...")
+        
         G = ox.graph_from_place(place, network_type=network_type)
-
-        # Convertir en GeoDataFrame pour faciliter le traitement
         nodes, edges = ox.graph_to_gdfs(G)
-
-        # Mettre en cache
         _cached_network = {'graph': G, 'nodes': nodes, 'edges': edges}
         _cached_place = place
-
         return G
     except Exception as e:
-        print(f"Erreur lors du téléchargement du réseau routier: {e}")
-        # Retourner None en cas d'erreur (connexion internet, etc.)
+        print(f"❌ Erreur lors du téléchargement du réseau routier: {e}")
         return None
 
 def associer_points_aux_routes(gdf_points, edges, max_distance=100):
@@ -322,12 +401,13 @@ def effectuer_mapmatching(df, place="Kinshasa, Democratic Republic of the Congo"
             else:
                 df = df_recent
         
-        # OPTIMISATION: Télécharger le réseau routier (utilise le cache si disponible)
-        print("Chargement du réseau routier (cache si disponible)...")
-        G = telecharger_reseau(place)
+        # OPTIMISATION: Charger le réseau routier depuis PostgreSQL (plus rapide) ou OSM
+        print("🌐 Chargement du réseau routier...")
+        result = telecharger_reseau(place, use_db=True)
 
-        if G is None:
-            print("Avertissement: Impossible de télécharger le réseau routier. Retour des données sans map matching.")
+        if result is None:
+            print("❌ Avertissement: Impossible de charger le réseau routier (ni PostgreSQL ni OSM).")
+            print("   Retour des données sans map matching.")
             df_result = df.copy()
             df_result['edge_u'] = None
             df_result['edge_v'] = None
@@ -339,18 +419,39 @@ def effectuer_mapmatching(df, place="Kinshasa, Democratic Republic of the Congo"
         # OPTIMISATION: Récupérer les arêtes du réseau depuis le cache
         global _cached_network
         if _cached_network is None or 'edges' not in _cached_network:
-            print("Conversion du réseau en GeoDataFrame...")
-            nodes, edges = ox.graph_to_gdfs(G)
-            _cached_network = {'graph': G, 'nodes': nodes, 'edges': edges}
+            if result is True:
+                # Chargé depuis DB mais cache vide (ne devrait pas arriver)
+                print("❌ Erreur: réseau routier DB chargé mais cache vide")
+                df_result = df.copy()
+                df_result['edge_u'] = None
+                df_result['edge_v'] = None
+                df_result['osmid'] = None
+                df_result['road_name'] = None
+                df_result['distance_to_road'] = None
+                return df_result
+            else:
+                # Téléchargé depuis OSM, convertir en GeoDataFrame
+                print("Conversion du réseau OSM en GeoDataFrame...")
+                G = result
+                nodes, edges = ox.graph_to_gdfs(G)
+                _cached_network = {'graph': G, 'nodes': nodes, 'edges': edges}
         else:
             edges = _cached_network['edges']
-            print(f"Utilisation du cache du réseau routier ({len(edges)} arêtes)")
+            if result is True:
+                print(f"✅ Utilisation du réseau routier depuis PostgreSQL ({len(edges)} arêtes)")
+            else:
+                print(f"✅ Utilisation du cache du réseau routier ({len(edges)} arêtes)")
 
         # OPTIMISATION: S'assurer que les edges ont u et v accessibles
-        if not isinstance(edges.index, pd.MultiIndex):
-            # Si ce n'est pas un MultiIndex, essayer de le réinitialiser
-            if 'u' not in edges.columns or 'v' not in edges.columns:
-                # Réessayer depuis le graph
+        # Si les edges viennent de DB, elles ont déjà u et v dans l'index MultiIndex
+        if isinstance(edges.index, pd.MultiIndex):
+            # OK, u et v sont dans l'index
+            pass
+        elif 'u' not in edges.columns or 'v' not in edges.columns:
+            # Si ce n'est pas un MultiIndex et pas de colonnes u/v, essayer de les extraire
+            if result is not True and result is not None:
+                # Réessayer depuis le graph OSM
+                G = result
                 nodes, edges = ox.graph_to_gdfs(G)
                 _cached_network['edges'] = edges
 

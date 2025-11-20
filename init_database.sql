@@ -119,3 +119,46 @@ CREATE INDEX IF NOT EXISTS idx_mapmatching_cache_timestamp ON mapmatching_cache(
 CREATE INDEX IF NOT EXISTS idx_mapmatching_cache_processed_at ON mapmatching_cache(processed_at DESC);
 CREATE INDEX IF NOT EXISTS idx_mapmatching_cache_edge ON mapmatching_cache(edge_u, edge_v);
 CREATE INDEX IF NOT EXISTS idx_mapmatching_cache_driver_id ON mapmatching_cache(driver_id);
+
+-- Extension PostGIS pour les données spatiales (nécessaire pour stocker le réseau routier)
+-- IMPORTANT: Exécuter manuellement sur le serveur PostgreSQL AVANT de charger le réseau routier:
+--   CREATE EXTENSION IF NOT EXISTS postgis;
+--   CREATE EXTENSION IF NOT EXISTS postgis_topology;
+-- Voir GUIDE_CHARGEMENT_RESEAU_ROUTIER.md pour plus de détails
+-- CREATE EXTENSION IF NOT EXISTS postgis;  -- Décommenter si PostGIS est installé et exécuter ce script
+
+-- Table pour stocker les nœuds (intersections) du réseau routier depuis OpenStreetMap
+-- Cette table permet de stocker le réseau routier une fois pour toutes et d'éviter les téléchargements répétés
+CREATE TABLE IF NOT EXISTS road_network_nodes (
+    id BIGSERIAL PRIMARY KEY,
+    osmid BIGINT UNIQUE NOT NULL,
+    geometry GEOMETRY(Point, 4326) NOT NULL,
+    x DOUBLE PRECISION NOT NULL,
+    y DOUBLE PRECISION NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Table pour stocker les arêtes (routes) du réseau routier depuis OpenStreetMap
+CREATE TABLE IF NOT EXISTS road_network_edges (
+    id BIGSERIAL PRIMARY KEY,
+    u BIGINT NOT NULL,  -- ID du nœud de départ
+    v BIGINT NOT NULL,  -- ID du nœud d'arrivée
+    osmid BIGINT,
+    name VARCHAR(255),
+    highway VARCHAR(50),
+    geometry GEOMETRY(LineString, 4326) NOT NULL,
+    length_m DOUBLE PRECISION,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(u, v, osmid)
+);
+
+-- Index spatiaux GIST pour des requêtes spatiales ultra-rapides avec PostGIS
+CREATE INDEX IF NOT EXISTS idx_road_nodes_geometry ON road_network_nodes USING GIST (geometry);
+CREATE INDEX IF NOT EXISTS idx_road_edges_geometry ON road_network_edges USING GIST (geometry);
+
+-- Index B-tree pour les recherches par ID
+CREATE INDEX IF NOT EXISTS idx_road_nodes_osmid ON road_network_nodes(osmid);
+CREATE INDEX IF NOT EXISTS idx_road_edges_u ON road_network_edges(u);
+CREATE INDEX IF NOT EXISTS idx_road_edges_v ON road_network_edges(v);
+CREATE INDEX IF NOT EXISTS idx_road_edges_u_v ON road_network_edges(u, v);
+CREATE INDEX IF NOT EXISTS idx_road_edges_osmid ON road_network_edges(osmid);
