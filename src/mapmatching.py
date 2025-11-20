@@ -250,13 +250,27 @@ def effectuer_mapmatching(df, place="Kinshasa, Democratic Republic of the Congo"
     """
     Fonction principale pour effectuer le map matching sur un DataFrame de points GPS.
     OPTIMISÉE: Limite drastiquement le nombre de points traités pour éviter les timeouts.
+    
+    IMPORTANT - FLUX DE DONNÉES:
+    ----------------------------
+    Les données GPS dans 'df' proviennent de la table gps_points (collectées par l'app mobile).
+    Cette fonction:
+    1. Reçoit les points GPS collectés (latitude, longitude, driver_id, speed, timestamp)
+    2. Télécharge le réseau routier depuis OpenStreetMap (OSM) via OSMnx
+    3. Associe chaque point GPS au tronçon de route OSM le plus proche
+    4. Retourne les points GPS enrichis avec les informations de route (edge_u, edge_v, road_name, etc.)
+    
+    Le map matching consiste donc à:
+    - Points GPS collectés (gps_points) ← Source: App mobile
+    - Réseau routier (OSM) ← Source: OpenStreetMap (téléchargé en ligne)
+    - Association spatiale ← Trouver la route la plus proche de chaque point GPS
 
     Parameters:
     -----------
     df : pandas.DataFrame
         DataFrame avec les colonnes latitude, longitude, et autres colonnes
     place : str
-        Nom du lieu pour télécharger le réseau routier
+        Nom du lieu pour télécharger le réseau routier depuis OpenStreetMap (par défaut: Kinshasa)
     max_distance : float
         Distance maximale (en mètres) pour associer un point à une route (par défaut: 50m au lieu de 100m)
     max_points : int

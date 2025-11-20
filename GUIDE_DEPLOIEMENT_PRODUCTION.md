@@ -1547,6 +1547,9 @@ docker-compose -f docker-compose.prod.yml build
 # 6. Redémarrer
 docker-compose -f docker-compose.prod.yml --env-file .env up -d
 
+# 7. Vérifier les contenaires encours d'exécution
+docker-compose -f docker-compose.prod.yml ps
+
 # 7. Vérifier les logs
 docker-compose -f docker-compose.prod.yml logs -f airflow
 ```
@@ -1573,6 +1576,7 @@ docker-compose -f docker-compose.prod.yml down
 docker-compose -f docker-compose.prod.yml --env-file .env up -d
 
 echo "Vérification des logs..."
+docker-compose -f docker-compose.prod.yml ps
 sleep 5
 docker-compose -f docker-compose.prod.yml logs --tail=50 airflow
 ```
