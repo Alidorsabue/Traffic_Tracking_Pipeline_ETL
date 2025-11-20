@@ -27,10 +27,16 @@ ox.settings.cache_folder = cache_dir
 _cached_network = None
 _cached_place = None
 
-def charger_reseau_depuis_db():
+def charger_reseau_depuis_db(place_label=None):
     """
     Charge le réseau routier depuis PostgreSQL au lieu de le télécharger.
     Version optimisée qui utilise PostGIS pour des requêtes spatiales rapides.
+    
+    Parameters:
+    -----------
+    place_label : str, optional
+        Nom de la ville pour charger (ex: "Kinshasa", "Lubumbashi")
+        Si None, charge toutes les villes disponibles
     
     Returns:
     --------
@@ -43,15 +49,26 @@ def charger_reseau_depuis_db():
         
         conn = get_db_connection()
         
-        # Charger les nœuds
-        nodes_query = """
-            SELECT osmid, ST_AsText(geometry) as geometry_wkt, x, y
-            FROM road_network_nodes
-        """
-        nodes_df = pd.read_sql(nodes_query, conn)
+        # Charger les nœuds (filtrer par ville si spécifié)
+        if place_label:
+            nodes_query = """
+                SELECT place, osmid, ST_AsText(geometry) as geometry_wkt, x, y
+                FROM road_network_nodes
+                WHERE place = %s
+            """
+            nodes_df = pd.read_sql(nodes_query, conn, params=(place_label,))
+        else:
+            nodes_query = """
+                SELECT place, osmid, ST_AsText(geometry) as geometry_wkt, x, y
+                FROM road_network_nodes
+            """
+            nodes_df = pd.read_sql(nodes_query, conn)
         
         if nodes_df.empty:
-            print("⚠️ Aucun nœud trouvé dans road_network_nodes")
+            if place_label:
+                print(f"[WARNING] Aucun nœud trouvé dans road_network_nodes pour {place_label}")
+            else:
+                print("[WARNING] Aucun nœud trouvé dans road_network_nodes")
             print("   Exécuter scripts/load_road_network_to_db.py pour charger le réseau routier")
             conn.close()
             return None
@@ -61,15 +78,26 @@ def charger_reseau_depuis_db():
         nodes_gdf = gpd.GeoDataFrame(nodes_df.drop(columns=['geometry_wkt']), geometry='geometry', crs='EPSG:4326')
         nodes_gdf = nodes_gdf.set_index('osmid')
         
-        # Charger les arêtes
-        edges_query = """
-            SELECT u, v, osmid, name, highway, ST_AsText(geometry) as geometry_wkt, length_m
-            FROM road_network_edges
-        """
-        edges_df = pd.read_sql(edges_query, conn)
+        # Charger les arêtes (filtrer par ville si spécifié)
+        if place_label:
+            edges_query = """
+                SELECT place, u, v, osmid, name, highway, ST_AsText(geometry) as geometry_wkt, length_m
+                FROM road_network_edges
+                WHERE place = %s
+            """
+            edges_df = pd.read_sql(edges_query, conn, params=(place_label,))
+        else:
+            edges_query = """
+                SELECT place, u, v, osmid, name, highway, ST_AsText(geometry) as geometry_wkt, length_m
+                FROM road_network_edges
+            """
+            edges_df = pd.read_sql(edges_query, conn)
         
         if edges_df.empty:
-            print("⚠️ Aucune arête trouvée dans road_network_edges")
+            if place_label:
+                print(f"[WARNING] Aucune arête trouvée dans road_network_edges pour {place_label}")
+            else:
+                print("[WARNING] Aucune arête trouvée dans road_network_edges")
             print("   Exécuter scripts/load_road_network_to_db.py pour charger le réseau routier")
             conn.close()
             return None
@@ -81,11 +109,19 @@ def charger_reseau_depuis_db():
         
         conn.close()
         
-        print(f"✅ Réseau routier chargé depuis PostgreSQL: {len(nodes_gdf)} nœuds, {len(edges_gdf)} arêtes")
+        # Afficher les statistiques par ville
+        if 'place' in nodes_df.columns:
+            cities_info = nodes_df['place'].value_counts()
+            cities_str = ", ".join([f"{city} ({count} nœuds)" for city, count in cities_info.items()])
+            print(f"[SUCCESS] Réseau routier chargé depuis PostgreSQL: {len(nodes_gdf)} nœuds, {len(edges_gdf)} arêtes")
+            print(f"   Villes: {cities_str}")
+        else:
+            print(f"[SUCCESS] Réseau routier chargé depuis PostgreSQL: {len(nodes_gdf)} nœuds, {len(edges_gdf)} arêtes")
+        
         return nodes_gdf, edges_gdf
         
     except Exception as e:
-        print(f"⚠️ Erreur lors du chargement depuis PostgreSQL: {e}")
+        print(f"[WARNING] Erreur lors du chargement depuis PostgreSQL: {e}")
         print("   Fallback vers téléchargement depuis OpenStreetMap...")
         import traceback
         traceback.print_exc()
@@ -132,9 +168,9 @@ def telecharger_reseau(place="Kinshasa, Democratic Republic of the Congo", netwo
     # Si échec ou use_db=False, télécharger depuis OSM (comportement original)
     try:
         if use_db:
-            print("⚠️ Chargement depuis PostgreSQL échoué, téléchargement depuis OSM...")
+            print("[WARNING] Chargement depuis PostgreSQL échoué, téléchargement depuis OSM...")
         else:
-            print("📥 Téléchargement du réseau routier depuis OpenStreetMap...")
+            print("[INFO] Téléchargement du réseau routier depuis OpenStreetMap...")
         
         G = ox.graph_from_place(place, network_type=network_type)
         nodes, edges = ox.graph_to_gdfs(G)
@@ -142,7 +178,7 @@ def telecharger_reseau(place="Kinshasa, Democratic Republic of the Congo", netwo
         _cached_place = place
         return G
     except Exception as e:
-        print(f"❌ Erreur lors du téléchargement du réseau routier: {e}")
+        print(f"[ERROR] Erreur lors du téléchargement du réseau routier: {e}")
         return None
 
 def associer_points_aux_routes(gdf_points, edges, max_distance=100):
@@ -402,11 +438,11 @@ def effectuer_mapmatching(df, place="Kinshasa, Democratic Republic of the Congo"
                 df = df_recent
         
         # OPTIMISATION: Charger le réseau routier depuis PostgreSQL (plus rapide) ou OSM
-        print("🌐 Chargement du réseau routier...")
+        print("[INFO] Chargement du réseau routier...")
         result = telecharger_reseau(place, use_db=True)
 
         if result is None:
-            print("❌ Avertissement: Impossible de charger le réseau routier (ni PostgreSQL ni OSM).")
+            print("[ERROR] Avertissement: Impossible de charger le réseau routier (ni PostgreSQL ni OSM).")
             print("   Retour des données sans map matching.")
             df_result = df.copy()
             df_result['edge_u'] = None
@@ -421,7 +457,7 @@ def effectuer_mapmatching(df, place="Kinshasa, Democratic Republic of the Congo"
         if _cached_network is None or 'edges' not in _cached_network:
             if result is True:
                 # Chargé depuis DB mais cache vide (ne devrait pas arriver)
-                print("❌ Erreur: réseau routier DB chargé mais cache vide")
+                print("[ERROR] Erreur: réseau routier DB chargé mais cache vide")
                 df_result = df.copy()
                 df_result['edge_u'] = None
                 df_result['edge_v'] = None
@@ -438,9 +474,9 @@ def effectuer_mapmatching(df, place="Kinshasa, Democratic Republic of the Congo"
         else:
             edges = _cached_network['edges']
             if result is True:
-                print(f"✅ Utilisation du réseau routier depuis PostgreSQL ({len(edges)} arêtes)")
+                print(f"[SUCCESS] Utilisation du réseau routier depuis PostgreSQL ({len(edges)} arêtes)")
             else:
-                print(f"✅ Utilisation du cache du réseau routier ({len(edges)} arêtes)")
+                print(f"[SUCCESS] Utilisation du cache du réseau routier ({len(edges)} arêtes)")
 
         # OPTIMISATION: S'assurer que les edges ont u et v accessibles
         # Si les edges viennent de DB, elles ont déjà u et v dans l'index MultiIndex

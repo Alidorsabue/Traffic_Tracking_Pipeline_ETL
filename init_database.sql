@@ -129,18 +129,23 @@ CREATE INDEX IF NOT EXISTS idx_mapmatching_cache_driver_id ON mapmatching_cache(
 
 -- Table pour stocker les nœuds (intersections) du réseau routier depuis OpenStreetMap
 -- Cette table permet de stocker le réseau routier une fois pour toutes et d'éviter les téléchargements répétés
+-- La colonne 'place' permet de distinguer les réseaux routiers de différentes villes (ex: Kinshasa, Lubumbashi)
 CREATE TABLE IF NOT EXISTS road_network_nodes (
     id BIGSERIAL PRIMARY KEY,
-    osmid BIGINT UNIQUE NOT NULL,
+    place VARCHAR(100) NOT NULL DEFAULT 'Kinshasa',  -- Nom de la ville/zone
+    osmid BIGINT NOT NULL,
     geometry GEOMETRY(Point, 4326) NOT NULL,
     x DOUBLE PRECISION NOT NULL,
     y DOUBLE PRECISION NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(place, osmid)  -- Un osmid est unique par place
 );
 
 -- Table pour stocker les arêtes (routes) du réseau routier depuis OpenStreetMap
+-- La colonne 'place' permet de distinguer les réseaux routiers de différentes villes
 CREATE TABLE IF NOT EXISTS road_network_edges (
     id BIGSERIAL PRIMARY KEY,
+    place VARCHAR(100) NOT NULL DEFAULT 'Kinshasa',  -- Nom de la ville/zone
     u BIGINT NOT NULL,  -- ID du nœud de départ
     v BIGINT NOT NULL,  -- ID du nœud d'arrivée
     osmid BIGINT,
@@ -149,15 +154,17 @@ CREATE TABLE IF NOT EXISTS road_network_edges (
     geometry GEOMETRY(LineString, 4326) NOT NULL,
     length_m DOUBLE PRECISION,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(u, v, osmid)
+    UNIQUE(place, u, v, osmid)  -- Un edge est unique par place
 );
 
 -- Index spatiaux GIST pour des requêtes spatiales ultra-rapides avec PostGIS
 CREATE INDEX IF NOT EXISTS idx_road_nodes_geometry ON road_network_nodes USING GIST (geometry);
 CREATE INDEX IF NOT EXISTS idx_road_edges_geometry ON road_network_edges USING GIST (geometry);
 
--- Index B-tree pour les recherches par ID
+-- Index B-tree pour les recherches par ID et par place
+CREATE INDEX IF NOT EXISTS idx_road_nodes_place ON road_network_nodes(place);
 CREATE INDEX IF NOT EXISTS idx_road_nodes_osmid ON road_network_nodes(osmid);
+CREATE INDEX IF NOT EXISTS idx_road_edges_place ON road_network_edges(place);
 CREATE INDEX IF NOT EXISTS idx_road_edges_u ON road_network_edges(u);
 CREATE INDEX IF NOT EXISTS idx_road_edges_v ON road_network_edges(v);
 CREATE INDEX IF NOT EXISTS idx_road_edges_u_v ON road_network_edges(u, v);

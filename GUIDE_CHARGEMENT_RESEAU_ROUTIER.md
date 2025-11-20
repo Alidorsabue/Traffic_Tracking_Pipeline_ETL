@@ -134,6 +134,8 @@ Elles ont été créées automatiquement lors de l'initialisation de la base de 
 
 ### Option A : Exécution manuelle (recommandée pour la première fois)
 
+#### Sur votre machine locale (Windows)
+
 ```bash
 # Dans votre environnement Python
 cd C:\Users\Helpdesk\OneDrive - AITS\Bureau\MASTER IA DATA SCIENCE DIT\RECHERCHES\Traffic_tracking_Pipiline_ETL
@@ -141,11 +143,38 @@ cd C:\Users\Helpdesk\OneDrive - AITS\Bureau\MASTER IA DATA SCIENCE DIT\RECHERCHE
 # Activer l'environnement virtuel
 .\venv\Scripts\activate
 
+# Installer les dépendances si nécessaire
+pip install -r requirements.txt
+
 # Exécuter le script
 python scripts/load_road_network_to_db.py
 ```
 
+#### Sur le serveur de production (Linux)
+
+```bash
+# Se connecter au serveur
+ssh root@alidor-server
+
+# Aller dans le répertoire du projet
+cd /opt/traffic-tracking
+
+# Installer les dépendances Python nécessaires
+pip3 install -r requirements-road-network.txt
+
+# OU installer les dépendances complètes
+pip3 install osmnx geopandas shapely pandas psycopg2-binary
+
+# Vérifier que Python peut trouver le module
+python3 -c "import osmnx; print('osmnx OK')"
+
+# Exécuter le script
+python3 scripts/load_road_network_to_db.py
+```
+
 **Durée estimée** : 10-30 minutes selon la connexion internet
+
+**Note** : Si vous avez une erreur "ModuleNotFoundError", installez les dépendances avec `pip3 install -r requirements-road-network.txt`
 
 **Ce que fait le script** :
 1. Télécharge le réseau routier de Kinshasa depuis OpenStreetMap
@@ -244,8 +273,7 @@ WHERE extname = 'postgis';
 ### Erreur : "Les tables n'existent pas"
 
 Exécutez le script `init_database.sql` pour créer les tables :
-```sql
-\i init_database.sql
+```sql \i init_database.sql
 ```
 
 ### Erreur : "Aucun nœud/arête trouvé dans PostgreSQL"

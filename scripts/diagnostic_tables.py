@@ -85,10 +85,10 @@ def check_table_data(table_name, query=None, use_direct=False):
             try:
                 conn = get_db_connection()
             except (UnicodeDecodeError, UnicodeError) as e:
-                print(f"⚠️ Problème d'encodage avec get_db_connection(), utilisation de la connexion directe...")
+                print(f"[WARNING] Problème d'encodage avec get_db_connection(), utilisation de la connexion directe...")
                 conn = get_db_connection_direct()
     except Exception as e:
-        print(f"❌ ERREUR lors de la connexion à la base de données: {e}")
+        print(f"[ERROR] ERREUR lors de la connexion à la base de données: {e}")
         return {
             'exists': False,
             'error': str(e),
@@ -127,28 +127,28 @@ def diagnostic_complete():
     print(f"Date du diagnostic: {datetime.now()}\n")
     
     # Test de connexion d'abord
-    print("🔍 Test de connexion à la base de données...")
+    print("[INFO] Test de connexion à la base de données...")
     try:
         test_conn = get_db_connection()
         test_conn.close()
-        print("✅ Connexion réussie avec get_db_connection()\n")
+        print("[SUCCESS] Connexion réussie avec get_db_connection()\n")
         use_direct = False
     except (UnicodeDecodeError, UnicodeError) as e:
-        print(f"⚠️ Problème d'encodage détecté, utilisation de la connexion directe...")
+        print(f"[WARNING] Problème d'encodage détecté, utilisation de la connexion directe...")
         try:
             test_conn = get_db_connection_direct()
             test_conn.close()
-            print("✅ Connexion réussie avec connexion directe\n")
+            print("[SUCCESS] Connexion réussie avec connexion directe\n")
             use_direct = True
         except Exception as e2:
-            print(f"❌ Impossible de se connecter à la base de données: {e2}")
+            print(f"[ERROR] Impossible de se connecter à la base de données: {e2}")
             print("\nVérifier:")
             print("  1. Que le serveur PostgreSQL est accessible (africaits.com:5432)")
             print("  2. Que les credentials sont corrects")
             print("  3. Que le pare-feu permet la connexion")
             return None
     except Exception as e:
-        print(f"❌ Erreur de connexion: {e}")
+        print(f"[ERROR] Erreur de connexion: {e}")
         return None
     
     results = {}
@@ -166,18 +166,18 @@ def diagnostic_complete():
     results['gps_points'] = gps_check
     
     if gps_check.get('exists'):
-        print(f"✅ Table gps_points existe")
+        print(f"[SUCCESS] Table gps_points existe")
         if gps_check['has_data']:
-            print(f"✅ {gps_check['total_rows']} lignes au total")
+            print(f"[SUCCESS] {gps_check['total_rows']} lignes au total")
             gps_details = gps_check['sample_data']
             if not gps_details.empty and 'oldest' in gps_details.columns:
                 print(f"   Plus ancienne donnée: {gps_details['oldest'].iloc[0]}")
                 print(f"   Plus récente donnée: {gps_details['newest'].iloc[0]}")
         else:
-            print(f"❌ Table gps_points est VIDE")
-            print(f"   ⚠️  PROBLÈME: L'app mobile n'envoie pas de données ou la connexion DB ne fonctionne pas")
+            print(f"[ERROR] Table gps_points est VIDE")
+            print(f"   [WARNING] PROBLÈME: L'app mobile n'envoie pas de données ou la connexion DB ne fonctionne pas")
     else:
-        print(f"❌ Table gps_points n'existe pas: {gps_check.get('error')}")
+        print(f"[ERROR] Table gps_points n'existe pas: {gps_check.get('error')}")
     
     # 2. Vérifier mapmatching_cache
     print("\n[2] VÉRIFICATION DE mapmatching_cache")
@@ -194,22 +194,22 @@ def diagnostic_complete():
     results['mapmatching_cache'] = cache_check
     
     if cache_check.get('exists'):
-        print(f"✅ Table mapmatching_cache existe")
+        print(f"[SUCCESS] Table mapmatching_cache existe")
         if cache_check['has_data']:
             cache_details = cache_check['sample_data']
             if not cache_details.empty:
                 total_recent = cache_details['count'].iloc[0] if 'count' in cache_details.columns else 0
                 matched = cache_details['matched_count'].iloc[0] if 'matched_count' in cache_details.columns else 0
-                print(f"✅ {total_recent} entrées dans les 2 dernières heures")
+                print(f"[SUCCESS] {total_recent} entrées dans les 2 dernières heures")
                 print(f"   {matched} points matchés ({matched/total_recent*100:.1f}%)" if total_recent > 0 else "   0% matchés")
                 if 'newest_processed' in cache_details.columns:
                     print(f"   Dernière mise à jour: {cache_details['newest_processed'].iloc[0]}")
         else:
-            print(f"❌ Table mapmatching_cache est VIDE ou aucune donnée récente")
-            print(f"   ⚠️  PROBLÈME: Le DAG 'mapmatching_cache_hourly' ne s'exécute pas ou échoue")
+            print(f"[ERROR] Table mapmatching_cache est VIDE ou aucune donnée récente")
+            print(f"   [WARNING] PROBLÈME: Le DAG 'mapmatching_cache_hourly' ne s'exécute pas ou échoue")
             print(f"   Solution: Vérifier que le DAG mapmatching_cache_hourly s'exécute toutes les heures")
     else:
-        print(f"❌ Table mapmatching_cache n'existe pas: {cache_check.get('error')}")
+        print(f"[ERROR] Table mapmatching_cache n'existe pas: {cache_check.get('error')}")
     
     # 3. Vérifier edge_agg
     print("\n[3] VÉRIFICATION DE edge_agg")
@@ -225,23 +225,23 @@ def diagnostic_complete():
     results['edge_agg'] = edge_check
     
     if edge_check.get('exists'):
-        print(f"✅ Table edge_agg existe")
+        print(f"[SUCCESS] Table edge_agg existe")
         if edge_check['has_data']:
             edge_details = edge_check['sample_data']
             if not edge_details.empty:
                 recent_count = edge_details['count'].iloc[0] if 'count' in edge_details.columns else 0
-                print(f"✅ {recent_count} lignes dans les 24 dernières heures")
+                print(f"[SUCCESS] {recent_count} lignes dans les 24 dernières heures")
                 total_edge = check_table_data('edge_agg', "SELECT COUNT(*) as count FROM edge_agg")['total_rows']
                 print(f"   Total: {total_edge} lignes")
         else:
-            print(f"❌ Table edge_agg est VIDE ou aucune donnée récente")
-            print(f"   ⚠️  PROBLÈME: Le DAG 'traffic_advanced_analysis' ne peut pas charger de données")
+            print(f"[ERROR] Table edge_agg est VIDE ou aucune donnée récente")
+            print(f"   [WARNING] PROBLÈME: Le DAG 'traffic_advanced_analysis' ne peut pas charger de données")
             print(f"   Causes possibles:")
             print(f"     - mapmatching_cache est vide")
             print(f"     - Les données GPS ne peuvent pas être matchées à des routes")
             print(f"     - Le DAG traffic_advanced_analysis échoue")
     else:
-        print(f"❌ Table edge_agg n'existe pas: {edge_check.get('error')}")
+        print(f"[ERROR] Table edge_agg n'existe pas: {edge_check.get('error')}")
     
     # 4. Vérifier predictions
     print("\n[4] VÉRIFICATION DE predictions")
@@ -257,20 +257,20 @@ def diagnostic_complete():
     results['predictions'] = pred_check
     
     if pred_check.get('exists'):
-        print(f"✅ Table predictions existe")
+        print(f"[SUCCESS] Table predictions existe")
         if pred_check['has_data']:
             pred_details = pred_check['sample_data']
             if not pred_details.empty:
                 recent_count = pred_details['count'].iloc[0] if 'count' in pred_details.columns else 0
-                print(f"✅ {recent_count} prédictions dans les 24 dernières heures")
+                print(f"[SUCCESS] {recent_count} prédictions dans les 24 dernières heures")
         else:
-            print(f"❌ Table predictions est VIDE")
-            print(f"   ⚠️  PROBLÈME: Le modèle ML ne peut pas générer de prédictions")
+            print(f"[ERROR] Table predictions est VIDE")
+            print(f"   [WARNING] PROBLÈME: Le modèle ML ne peut pas générer de prédictions")
             print(f"   Causes possibles:")
             print(f"     - edge_agg est vide (pas de données pour entraîner/prédire)")
             print(f"     - Le modèle ML échoue lors de l'entraînement ou de la prédiction")
     else:
-        print(f"❌ Table predictions n'existe pas: {pred_check.get('error')}")
+        print(f"[ERROR] Table predictions n'existe pas: {pred_check.get('error')}")
     
     # 5. Vérifier edge_hourly_baseline
     print("\n[5] VÉRIFICATION DE edge_hourly_baseline")
@@ -279,9 +279,9 @@ def diagnostic_complete():
     results['edge_hourly_baseline'] = baseline_check
     
     if baseline_check.get('exists'):
-        print(f"✅ Table edge_hourly_baseline existe")
+        print(f"[SUCCESS] Table edge_hourly_baseline existe")
         if baseline_check['has_data']:
-            print(f"✅ {baseline_check['total_rows']} lignes de baseline")
+            print(f"[SUCCESS] {baseline_check['total_rows']} lignes de baseline")
             query_baseline_details = """
                 SELECT COUNT(DISTINCT edge_u || '-' || edge_v) as unique_edges,
                        COUNT(DISTINCT hour) as unique_hours
